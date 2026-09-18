@@ -10,52 +10,88 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show repository files
+      - name: Find ZIP package
+        shell: bash
         run: |
-          echo "Repository:"
-          pwd
-          echo
-          echo "Files:"
-          find . -maxdepth 3 -type f | sort
+          set -e
 
-      - name: Check ZIP
-        run: |
-          test -f podnikatel-saas-final-v10.zip
-          echo "ZIP found:"
-          ls -lh podnikatel-saas-final-v10.zip
+          ZIP_FILE=$(find . -type f -iname '*.zip' \
+            -not -path './.git/*' \
+            | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file found."
+            echo
+            echo "Repository files:"
+            find . -maxdepth 4 -type f | sort
+            exit 1
+          fi
+
+          echo "Found ZIP:"
+          echo "$ZIP_FILE"
+
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
       - name: Test ZIP integrity
         run: |
-          unzip -t podnikatel-saas-final-v10.zip
+          set -e
+          echo "Testing: $ZIP_FILE"
+          unzip -t "$ZIP_FILE"
 
       - name: Extract ZIP
+        shell: bash
         run: |
+          set -e
+
           rm -rf build
           mkdir -p build
 
-          unzip -q podnikatel-saas-final-v10.zip -d build
+          echo "Extracting:"
+          echo "$ZIP_FILE"
 
+          unzip -q "$ZIP_FILE" -d build
+
+          echo
+          echo "Extraction completed."
+          echo
           echo "Extracted files:"
-          find build -maxdepth 3 -type f | sort
+          find build -maxdepth 5 -type f | sort
 
       - name: Detect application root
+        shell: bash
         run: |
+          set -e
+
+          ROOT=""
+
           if [ -f "build/composer.json" ]; then
-            echo "APP_ROOT=build" >> "$GITHUB_ENV"
-          elif [ -f "build/podnikatel/composer.json" ]; then
-            echo "APP_ROOT=build/podnikatel" >> "$GITHUB_ENV"
+            ROOT="build"
           else
-            echo "ERROR: composer.json was not found"
-            find build -maxdepth 5 -type f | sort
+            ROOT=$(find build -type f -name composer.json \
+              -not -path '*/vendor/*' \
+              -printf '%h\n' \
+              | head -n 1)
+          fi
+
+          if [ -z "$ROOT" ]; then
+            echo "ERROR: composer.json not found after ZIP extraction."
+            echo
+            find build -maxdepth 6 -type f | sort
             exit 1
           fi
+
+          echo "Application root:"
+          echo "$ROOT"
+
+          echo "APP_ROOT=$ROOT" >> "$GITHUB_ENV"
 
       - name: Show application root
         run: |
           echo "APP_ROOT=$APP_ROOT"
+          echo
           ls -la "$APP_ROOT"
 
       - name: Setup PHP
@@ -67,45 +103,70 @@ jobs:
 
       - name: Composer validate
         working-directory: ${{ env.APP_ROOT }}
-        run: composer validate --no-check-publish
+        run: |
+          composer validate --no-check-publish
 
       - name: Composer install
         working-directory: ${{ env.APP_ROOT }}
-        run: composer install --no-interaction --prefer-dist --no-progress
+        run: |
+          composer install \
+            --no-interaction \
+            --prefer-dist \
+            --no-progress
 
       - name: PHP syntax check
         working-directory: ${{ env.APP_ROOT }}
+        shell: bash
         run: |
+          set -e
+
+          echo "Checking PHP syntax..."
+
           find . \
-            -path './vendor' -prune -o \
-            -name '*.php' -type f -print0 |
-          xargs -0 -n1 php -l
+            -path './vendor' -prune \
+            -o -name '*.php' -type f -print0 |
+          while IFS= read -r -d '' file; do
+            php -l "$file"
+          done
+
+          echo "PHP syntax OK."
 
       - name: Test Composer autoload
         working-directory: ${{ env.APP_ROOT }}
         run: |
-          php -r "require 'vendor/autoload.php'; echo 'Autoload OK'.PHP_EOL;"
+          php -r "
+            require 'vendor/autoload.php';
+            echo 'Composer autoload OK';
+            echo PHP_EOL;
+          "
 
       - name: Test PDO SQLite
         run: |
           php -r '
-          $pdo = new PDO("sqlite::memory:");
-          $pdo->query("SELECT 1");
-          echo "PDO SQLite OK\n";
+            $pdo = new PDO("sqlite::memory:");
+            $pdo->query("SELECT 1");
+            echo "PDO SQLite OK\n";
           '
 
-      - name: Check required files
+      - name: Check required application files
         working-directory: ${{ env.APP_ROOT }}
         run: |
+          set -e
+
           test -f composer.json
           test -f public/index.php
           test -f src/bootstrap.php
           test -f src/Core/Kernel.php
 
-          echo "Required files OK"
+          echo "Required application files OK."
 
-      - name: Final result
+      - name: Build result
         run: |
-          echo "======================================"
-          echo "PODNIKATEL SAAS BUILD OK"
-          echo "======================================"
+          echo
+          echo "=============================================="
+          echo "  PODNIKATEL SAAS BUILD OK"
+          echo "=============================================="
+          echo
+          echo "ZIP: $ZIP_FILE"
+          echo "APP_ROOT: $APP_ROOT"
+          echo

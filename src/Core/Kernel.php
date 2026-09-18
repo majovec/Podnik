@@ -10,7 +10,7 @@ final class Kernel {
         header('Referrer-Policy: strict-origin-when-cross-origin');
         header("Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;");
         $r=new Router(); $w=new WebController(Database::pdo());
-        $r->get('/health',function(){header('Content-Type: application/json');echo json_encode(['ok'=>true,'app'=>\App\Core\Env::get('APP_NAME','Podnikatel'),'time'=>date(DATE_ATOM)]);exit;});
+        $r->get('/health',function(){header('Content-Type: application/json');echo json_encode(['ok'=>true,'app'=>\App\Core\Env::get('APP_NAME','Byznio'),'time'=>date(DATE_ATOM)]);exit;});
         $r->get('/',fn()=> Auth::check() ? $w->dashboard() : $w->landing());
         $r->get('/login',fn()=> $w->login()); $r->post('/login',fn()=> $w->loginPost());
         $r->get('/register',fn()=> $w->register()); $r->post('/register',fn()=> $w->registerPost());

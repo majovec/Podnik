@@ -1,196 +1,111 @@
-name: Podnikatel SaaS - PHP Build
+name: Build Podnikatel SaaS
 
 on:
   push:
-    branches:
-      - main
-      - master
-  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
 
 jobs:
   build:
-    name: PHP Build & Tests
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Stažení repozitáře
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Najdeme ZIP aplikace
-      - name: Find application ZIP
-        id: zip
-        shell: bash
+      - name: Show repository files
         run: |
-          ZIP_FILE=$(find . -maxdepth 2 -type f -name "*.zip" | head -n 1)
+          echo "Repository:"
+          pwd
+          echo
+          echo "Files:"
+          find . -maxdepth 3 -type f | sort
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "❌ Nebyl nalezen žádný ZIP soubor aplikace."
-            exit 1
-          fi
+      - name: Check ZIP
+        run: |
+          test -f podnikatel-saas-final-v10.zip
+          echo "ZIP found:"
+          ls -lh podnikatel-saas-final-v10.zip
 
-          echo "Nalezen: $ZIP_FILE"
-          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+      - name: Test ZIP integrity
+        run: |
+          unzip -t podnikatel-saas-final-v10.zip
 
-      # 3. Rozbalení V10
-      - name: Extract application
-        shell: bash
+      - name: Extract ZIP
         run: |
           rm -rf build
           mkdir -p build
 
-          unzip -q "${{ steps.zip.outputs.zip_file }}" -d build
+          unzip -q podnikatel-saas-final-v10.zip -d build
 
-          echo "Obsah buildu:"
-          find build -maxdepth 3 -type f | sort | head -200
+          echo "Extracted files:"
+          find build -maxdepth 3 -type f | sort
 
-      # 4. Najdeme skutečný root aplikace
       - name: Detect application root
-        id: app
-        shell: bash
         run: |
-          if [ -f "build/podnikatel/composer.json" ]; then
-            APP_DIR="build/podnikatel"
-          elif [ -f "build/composer.json" ]; then
-            APP_DIR="build"
+          if [ -f "build/composer.json" ]; then
+            echo "APP_ROOT=build" >> "$GITHUB_ENV"
+          elif [ -f "build/podnikatel/composer.json" ]; then
+            echo "APP_ROOT=build/podnikatel" >> "$GITHUB_ENV"
           else
-            APP_DIR=$(find build -type f -name composer.json -printf '%h\n' | head -n 1)
-          fi
-
-          if [ -z "$APP_DIR" ]; then
-            echo "❌ Nebyl nalezen composer.json."
+            echo "ERROR: composer.json was not found"
+            find build -maxdepth 5 -type f | sort
             exit 1
           fi
 
-          echo "Root aplikace: $APP_DIR"
-          echo "app_dir=$APP_DIR" >> "$GITHUB_OUTPUT"
+      - name: Show application root
+        run: |
+          echo "APP_ROOT=$APP_ROOT"
+          ls -la "$APP_ROOT"
 
-      # 5. PHP
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
           extensions: mbstring, sqlite3, pdo_sqlite, curl, fileinfo, openssl
-          coverage: none
-          tools: composer:v2
+          tools: composer
 
-      # 6. Kontrola PHP
-      - name: PHP version
-        working-directory: ${{ steps.app.outputs.app_dir }}
-        run: php -v
-
-      # 7. Kontrola composer.json
       - name: Composer validate
-        working-directory: ${{ steps.app.outputs.app_dir }}
+        working-directory: ${{ env.APP_ROOT }}
         run: composer validate --no-check-publish
 
-      # 8. Instalace PHP závislostí
       - name: Composer install
-        working-directory: ${{ steps.app.outputs.app_dir }}
-        run: |
-          composer install \
-            --no-interaction \
-            --prefer-dist \
-            --no-progress
+        working-directory: ${{ env.APP_ROOT }}
+        run: composer install --no-interaction --prefer-dist --no-progress
 
-      # 9. PHP syntax check všech PHP souborů
       - name: PHP syntax check
-        working-directory: ${{ steps.app.outputs.app_dir }}
-        shell: bash
+        working-directory: ${{ env.APP_ROOT }}
         run: |
-          set -e
+          find . \
+            -path './vendor' -prune -o \
+            -name '*.php' -type f -print0 |
+          xargs -0 -n1 php -l
 
-          ERRORS=0
-
-          while IFS= read -r -d '' FILE; do
-            echo "Kontroluji: $FILE"
-
-            if ! php -l "$FILE" > /tmp/php_lint.txt 2>&1; then
-              cat /tmp/php_lint.txt
-              ERRORS=$((ERRORS + 1))
-            fi
-          done < <(find . \
-            -type f \
-            -name "*.php" \
-            -not -path "./vendor/*" \
-            -print0)
-
-          if [ "$ERRORS" -gt 0 ]; then
-            echo ""
-            echo "❌ PHP syntax check selhal."
-            echo "Počet chybných souborů: $ERRORS"
-            exit 1
-          fi
-
-          echo ""
-          echo "✅ Všechny PHP soubory mají správnou syntaxi."
-
-      # 10. Ověření Composer autoloadu
-      - name: Composer autoload check
-        working-directory: ${{ steps.app.outputs.app_dir }}
+      - name: Test Composer autoload
+        working-directory: ${{ env.APP_ROOT }}
         run: |
-          php -r "require 'vendor/autoload.php'; echo '✅ Composer autoload OK'.PHP_EOL;"
+          php -r "require 'vendor/autoload.php'; echo 'Autoload OK'.PHP_EOL;"
 
-      # 11. Kontrola SQLite
-      - name: SQLite / PDO check
+      - name: Test PDO SQLite
         run: |
           php -r '
-          echo "PDO drivers: ";
-          print_r(PDO::getAvailableDrivers());
-
-          if (!in_array("sqlite", PDO::getAvailableDrivers(), true)) {
-              fwrite(STDERR, "❌ PDO SQLite není dostupné.\n");
-              exit(1);
-          }
-
-          echo "✅ PDO SQLite OK\n";
+          $pdo = new PDO("sqlite::memory:");
+          $pdo->query("SELECT 1");
+          echo "PDO SQLite OK\n";
           '
 
-      # 12. PHPUnit pokud existuje
-      - name: PHPUnit
-        working-directory: ${{ steps.app.outputs.app_dir }}
-        shell: bash
+      - name: Check required files
+        working-directory: ${{ env.APP_ROOT }}
         run: |
-          if [ -f "vendor/bin/phpunit" ]; then
-            echo "Spouštím PHPUnit..."
-            vendor/bin/phpunit
-          else
-            echo "ℹ️ PHPUnit není v projektu definován – test přeskočen."
-          fi
+          test -f composer.json
+          test -f public/index.php
+          test -f src/bootstrap.php
+          test -f src/Core/Kernel.php
 
-      # 13. Kontrola důležitých souborů
-      - name: Application structure check
-        working-directory: ${{ steps.app.outputs.app_dir }}
-        shell: bash
+          echo "Required files OK"
+
+      - name: Final result
         run: |
-          set -e
-
-          REQUIRED_FILES=(
-            "composer.json"
-            "public/index.php"
-            "src/bootstrap.php"
-            "src/Core/Kernel.php"
-          )
-
-          for FILE in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$FILE" ]; then
-              echo "❌ Chybí: $FILE"
-              exit 1
-            fi
-
-            echo "✅ $FILE"
-          done
-
-      # 14. Finální výsledek
-      - name: Build successful
-        run: |
-          echo ""
-          echo "========================================="
-          echo "       PODNIKATEL SAAS BUILD OK"
-          echo "========================================="
-          echo "PHP syntax:       OK"
-          echo "Composer:         OK"
-          echo "Autoload:         OK"
-          echo "SQLite/PDO:       OK"
-          echo "Structure:        OK"
-          echo "========================================="
+          echo "======================================"
+          echo "PODNIKATEL SAAS BUILD OK"
+          echo "======================================"

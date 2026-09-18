@@ -1,145 +1,160 @@
 name: Build Podnikatel SaaS
-
 on:
-  push:
-    branches: ["main", "master"]
   workflow_dispatch:
-
+  push:
+    paths:
+      - "**/*.zip"
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
+      # --------------------------------------------------
+      # 1. Načtení repozitáře
+      # --------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Find ZIP package
+        with:
+          fetch-depth: 0
+      # --------------------------------------------------
+      # 2. Najdi libovolný ZIP
+      # --------------------------------------------------
+      - name: Find ZIP
         shell: bash
         run: |
           set -e
-
-          ZIP_FILE=$(find . -type f -iname '*.zip' \
-            -not -path './.git/*' \
+          ZIP_FILE=$(find . \
+            -type f \
+            -iname "*.zip" \
+            -not -path "./.git/*" \
             | head -n 1)
-
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found."
-            echo
-            echo "Repository files:"
-            find . -maxdepth 4 -type f | sort
+            echo "No ZIP file found."
             exit 1
           fi
-
           echo "Found ZIP:"
           echo "$ZIP_FILE"
-
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
-
+      # --------------------------------------------------
+      # 3. Ověření ZIPu
+      # --------------------------------------------------
       - name: Test ZIP integrity
         run: |
           set -e
-          echo "Testing: $ZIP_FILE"
-          unzip -t "$ZIP_FILE"
-
-      - name: Extract ZIP
-        shell: bash
-        run: |
-          set -e
-
-          rm -rf build
-          mkdir -p build
-
-          echo "Extracting:"
+          echo "Testing ZIP:"
           echo "$ZIP_FILE"
-
-          unzip -q "$ZIP_FILE" -d build
-
-          echo
-          echo "Extraction completed."
-          echo
-          echo "Extracted files:"
-          find build -maxdepth 5 -type f | sort
-
-      - name: Detect application root
+          unzip -t "$ZIP_FILE"
+      # --------------------------------------------------
+      # 4. Rozbalení ZIPu
+      # --------------------------------------------------
+      - name: Extract ZIP into repository
         shell: bash
         run: |
           set -e
-
-          ROOT=""
-
-          if [ -f "build/composer.json" ]; then
-            ROOT="build"
+          TEMP_DIR=$(mktemp -d)
+          echo "Extracting ZIP..."
+          unzip -q "$ZIP_FILE" -d "$TEMP_DIR"
+          echo "Contents:"
+          find "$TEMP_DIR" -maxdepth 4 -type f | sort
+          # Najdeme kořen projektu podle composer.json
+          if [ -f "$TEMP_DIR/composer.json" ]; then
+            SOURCE="$TEMP_DIR"
           else
-            ROOT=$(find build -type f -name composer.json \
-              -not -path '*/vendor/*' \
-              -printf '%h\n' \
+            SOURCE=$(find "$TEMP_DIR" \
+              -type f \
+              -name "composer.json" \
+              -not -path "*/vendor/*" \
+              -printf "%h\n" \
               | head -n 1)
           fi
-
-          if [ -z "$ROOT" ]; then
-            echo "ERROR: composer.json not found after ZIP extraction."
-            echo
-            find build -maxdepth 6 -type f | sort
+          if [ -z "$SOURCE" ]; then
+            echo "ERROR: composer.json was not found inside ZIP."
             exit 1
           fi
-
-          echo "Application root:"
-          echo "$ROOT"
-
-          echo "APP_ROOT=$ROOT" >> "$GITHUB_ENV"
-
-      - name: Show application root
-        run: |
-          echo "APP_ROOT=$APP_ROOT"
+          echo "Project root:"
+          echo "$SOURCE"
+          # Smažeme obsah repozitáře kromě .git a .github
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name ".git" \
+            ! -name ".github" \
+            -exec rm -rf {} +
+          # Nakopírujeme skutečný projekt
+          cp -a "$SOURCE"/. .
+          # ZIP už v repozitáři nepotřebujeme
+          rm -f "$ZIP_FILE"
           echo
-          ls -la "$APP_ROOT"
-
+          echo "PROJECT EXTRACTED"
+          echo
+          echo "Project files:"
+          find . -maxdepth 3 -type f \
+            -not -path "./.git/*" \
+            | sort
+      # --------------------------------------------------
+      # 5. Commit rozbaleného projektu
+      # --------------------------------------------------
+      - name: Commit extracted project
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Extract project from ZIP"
+            git push
+          fi
+      # --------------------------------------------------
+      # 6. PHP
+      # --------------------------------------------------
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
           extensions: mbstring, sqlite3, pdo_sqlite, curl, fileinfo, openssl
           tools: composer
-
+      # --------------------------------------------------
+      # 7. Composer
+      # --------------------------------------------------
       - name: Composer validate
-        working-directory: ${{ env.APP_ROOT }}
         run: |
           composer validate --no-check-publish
-
       - name: Composer install
-        working-directory: ${{ env.APP_ROOT }}
         run: |
           composer install \
             --no-interaction \
             --prefer-dist \
             --no-progress
-
+      # --------------------------------------------------
+      # 8. PHP syntax
+      # --------------------------------------------------
       - name: PHP syntax check
-        working-directory: ${{ env.APP_ROOT }}
         shell: bash
         run: |
           set -e
-
           echo "Checking PHP syntax..."
-
           find . \
-            -path './vendor' -prune \
-            -o -name '*.php' -type f -print0 |
+            -path "./vendor" -prune \
+            -o -name "*.php" -type f -print0 |
           while IFS= read -r -d '' file; do
             php -l "$file"
           done
-
           echo "PHP syntax OK."
-
+      # --------------------------------------------------
+      # 9. Composer autoload
+      # --------------------------------------------------
       - name: Test Composer autoload
-        working-directory: ${{ env.APP_ROOT }}
         run: |
           php -r "
             require 'vendor/autoload.php';
             echo 'Composer autoload OK';
             echo PHP_EOL;
           "
-
+      # --------------------------------------------------
+      # 10. SQLite
+      # --------------------------------------------------
       - name: Test PDO SQLite
         run: |
           php -r '
@@ -147,26 +162,32 @@ jobs:
             $pdo->query("SELECT 1");
             echo "PDO SQLite OK\n";
           '
-
-      - name: Check required application files
-        working-directory: ${{ env.APP_ROOT }}
+      # --------------------------------------------------
+      # 11. Kontrola projektu
+      # --------------------------------------------------
+      - name: Check required files
+        shell: bash
         run: |
           set -e
-
           test -f composer.json
           test -f public/index.php
           test -f src/bootstrap.php
           test -f src/Core/Kernel.php
-
           echo "Required application files OK."
-
-      - name: Build result
+      # --------------------------------------------------
+      # 12. Výsledek
+      # --------------------------------------------------
+      - name: Build successful
         run: |
           echo
           echo "=============================================="
-          echo "  PODNIKATEL SAAS BUILD OK"
+          echo "       PODNIKATEL SAAS BUILD OK"
           echo "=============================================="
           echo
-          echo "ZIP: $ZIP_FILE"
-          echo "APP_ROOT: $APP_ROOT"
+          echo "ZIP was extracted directly into repository."
+          echo "PHP syntax: OK"
+          echo "Composer: OK"
+          echo "Autoload: OK"
+          echo "PDO SQLite: OK"
+          echo "Required files: OK"
           echo

@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS reminder_log(id INTEGER PRIMARY KEY AUTOINCREMENT,wor
 CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id,status,due_at);
 CREATE INDEX IF NOT EXISTS idx_files_workspace ON documents_files(workspace_id,created_at);
 
-CREATE TABLE IF NOT EXISTS document_series(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id INTEGER NOT NULL,doc_type TEXT NOT NULL,prefix TEXT NOT NULL,next_number INTEGER NOT NULL DEFAULT 1 UNIQUE(workspace_id,doc_type),FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS document_series(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id INTEGER NOT NULL,doc_type TEXT NOT NULL,prefix TEXT NOT NULL,next_number INTEGER NOT NULL DEFAULT 1,UNIQUE(workspace_id,doc_type),FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS custom_roles(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id INTEGER NOT NULL,name TEXT NOT NULL,permissions_json TEXT NOT NULL DEFAULT '{}',created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(workspace_id,name),FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS inventory_counts(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id INTEGER NOT NULL,product_id INTEGER NOT NULL,expected_stock REAL NOT NULL,counted_stock REAL NOT NULL,difference REAL NOT NULL,note TEXT,created_by INTEGER,created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS login_attempts(id INTEGER PRIMARY KEY AUTOINCREMENT,ip_hash TEXT NOT NULL,email_hash TEXT NOT NULL,attempted_at INTEGER NOT NULL);

@@ -2,7 +2,7 @@
 namespace App\Controllers;
 use PDO;
 use App\Core\{Auth,View,Response,Env};
-use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService};
+use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService};
 final class WebController {
     public function __construct(private PDO $db){}
     private function scope(string $sql,array $params=[]):array{$s=$this->db->prepare($sql);$s->execute([Auth::workspaceId(),...$params]);return $s->fetchAll();}
@@ -69,7 +69,65 @@ final class WebController {
     public function aiAsk():void{Auth::require();Auth::verifyCsrf();$prompt=trim($_POST['prompt']??'');$ctx=['today'=>date('Y-m-d'),'customers'=>$this->scope('SELECT id,company_name,first_name,last_name FROM customers WHERE workspace_id=? AND active=1 LIMIT 100'),'overdue'=>$this->scope('SELECT id,doc_number,total_with_vat,due_date FROM documents WHERE workspace_id=? AND payment_status!="paid" AND due_date<date("now") LIMIT 20'),'tasks'=>$this->scope('SELECT title,due_at,priority FROM tasks WHERE workspace_id=? AND status="open" LIMIT 20')];$pending=null;$lower=mb_strtolower($prompt);if(preg_match('/(?:vystav|vytvoř|vytvor|připrav|priprav).*faktur.*?(.+?)\s+za\s+([0-9]+(?:[.,][0-9]+)?)\s*(?:kč|czk)?/iu',$prompt,$m)){$name=trim($m[1]);$amount=(float)str_replace(',','.',$m[2]);$cid=null;$q=$this->db->prepare('SELECT id FROM customers WHERE workspace_id=? AND (company_name LIKE ? OR last_name LIKE ? OR first_name LIKE ?) LIMIT 1');$like='%'.$name.'%';$q->execute([Auth::workspaceId(),$like,$like,$like]);$cid=$q->fetchColumn();$pending=['action_type'=>'create_invoice','payload'=>['customer_id'=>(int)$cid,'customer_name'=>$name,'amount'=>$amount,'description'=>'AI návrh faktury']];$_SESSION['ai_pending']=$pending;$answer='Připravil jsem návrh faktury pro '.$name.' na '.number_format($amount,2,',',' ').' Kč. Před vytvořením ji potvrďte.';}elseif(preg_match('/(?:vytvoř|vytvor|přidej|pridej).*zákazník.*?(?:firma|společnost)?\s*(.+)$/iu',$prompt,$m)){$pending=['action_type'=>'create_customer','payload'=>['company_name'=>trim($m[1])]];$_SESSION['ai_pending']=$pending;$answer='Připravil jsem návrh zákazníka „'.trim($m[1]).'“. Před uložením jej potvrďte.';}elseif(stripos($lower,'nabídku')!==false||stripos($lower,'nabidku')!==false){$answer='Návrh nabídky připravím z kontextu zákazníka a zakázky; pro finanční vytvoření vyžaduji potvrzení.';}else{$answer=AiService::ask($prompt,$ctx);}View::render('ai/index',['title'=>'AI asistent','answer'=>$answer,'pending'=>$_SESSION['ai_pending']??null]);}
     public function aiConfirm():void{Auth::require();Auth::verifyCsrf();$a=$_SESSION['ai_pending']??null;if(!$a)Response::abort(400,'Žádná čekající AI akce.');$p=$a['payload'];if($a['action_type']==='create_customer'){$this->db->prepare('INSERT INTO customers(workspace_id,type,company_name) VALUES(?,?,?)')->execute([Auth::workspaceId(),'company',$p['company_name']]);$id=(int)$this->db->lastInsertId();$this->audit('ai_create','customer',$id,$p);}elseif($a['action_type']==='create_invoice'){$cid=(int)$p['customer_id'];if(!$cid)Response::abort(422,'AI nenašla jednoznačného zákazníka.');$n=DocumentService::nextNumber($this->db,Auth::workspaceId(),'invoice');$amount=(float)$p['amount'];$this->db->prepare('INSERT INTO documents(workspace_id,doc_type,doc_number,variable_symbol,customer_id,status,payment_status,issue_date,due_date,total_without_vat,total_vat,total_with_vat,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')->execute([Auth::workspaceId(),'invoice',$n,preg_replace('/\D/','',$n),$cid,'issued','unpaid',date('Y-m-d'),date('Y-m-d',strtotime('+14 days')),round($amount/1.21,2),round($amount-round($amount/1.21,2),2),$amount,Auth::id()]);$id=(int)$this->db->lastInsertId();$this->db->prepare('INSERT INTO document_items(document_id,name,quantity,unit,unit_price,vat_rate,line_total) VALUES(?,?,?,?,?,?,?)')->execute([$id,$p['description'],1,'ks',round($amount/1.21,2),21,round($amount/1.21,2)]);$this->audit('ai_create','invoice',$id,$p);}unset($_SESSION['ai_pending']);Response::redirect('/ai');}
     public function settings():void{Auth::require();$s=$this->db->prepare('SELECT * FROM workspaces WHERE id=?');$s->execute([Auth::workspaceId()]);View::render('settings/index',['title'=>'Nastavení','workspace'=>$s->fetch(),'mail_domain'=>$this->saasSettings()['mail_domain']]);}
-    public function settingsSave():void{Auth::require();Auth::verifyCsrf();$local=preg_replace('/[^a-z0-9.-]/i','',strtolower($_POST['email_localpart']??''));if($local==='')$local=$this->makeEmailLocalpart((string)$_POST['name']);$this->db->prepare('UPDATE workspaces SET name=?,email_localpart=?,mail_enabled=?,mail_invoices=?,mail_reminders=?,mail_receipts=?,mail_offers=?,ico=?,dic=?,street=?,city=?,zip=?,email=?,phone=?,bank_account=? WHERE id=?')->execute([$_POST['name'],$local,isset($_POST['mail_enabled'])?1:0,isset($_POST['mail_invoices'])?1:0,isset($_POST['mail_reminders'])?1:0,isset($_POST['mail_receipts'])?1:0,isset($_POST['mail_offers'])?1:0,$_POST['ico']??null,$_POST['dic']??null,$_POST['street']??null,$_POST['city']??null,$_POST['zip']??null,$_POST['email']??null,$_POST['phone']??null,$_POST['bank_account']??null,Auth::workspaceId()]);Response::redirect('/settings');}
+    public function settingsSave():void{
+        Auth::require(); Auth::verifyCsrf();
+        $local=preg_replace('/[^a-z0-9.-]/i','',strtolower($_POST['email_localpart']??''));
+        if($local==='') $local=$this->makeEmailLocalpart((string)$_POST['name']);
+        $rawBank=trim((string)($_POST['bank_account']??''));
+        $iban=$rawBank===''?null:$this->normalizeIban($rawBank);
+        if($rawBank!=='' && !$iban) Response::abort(422,'Bankovní účet musí být platný IBAN (CZ...) nebo český účet ve formátu číslo/kód banky.');
+        $this->db->prepare('UPDATE workspaces SET name=?,email_localpart=?,mail_enabled=?,mail_invoices=?,mail_reminders=?,mail_receipts=?,mail_offers=?,ico=?,dic=?,street=?,city=?,zip=?,email=?,phone=?,bank_account=? WHERE id=?')->execute([
+            $_POST['name'],$local,isset($_POST['mail_enabled'])?1:0,isset($_POST['mail_invoices'])?1:0,isset($_POST['mail_reminders'])?1:0,isset($_POST['mail_receipts'])?1:0,isset($_POST['mail_offers'])?1:0,
+            $_POST['ico']??null,$_POST['dic']??null,$_POST['street']??null,$_POST['city']??null,$_POST['zip']??null,$_POST['email']??null,$_POST['phone']??null,$iban,Auth::workspaceId()
+        ]);
+        Response::redirect('/settings');
+    }
+    public function bankSettings():void{
+        Auth::require(); $this->gate('bank');
+        $s=$this->db->prepare('SELECT * FROM bank_accounts WHERE workspace_id=? AND active=1 ORDER BY id DESC');
+        $s->execute([Auth::workspaceId()]);
+        $accounts=$s->fetchAll();
+        $s=$this->db->prepare('SELECT * FROM bank_connections WHERE workspace_id=? ORDER BY id DESC');
+        $s->execute([Auth::workspaceId()]);
+        $multi=$s->fetchAll();
+        View::render('bank/accounts',['title'=>'Bankovní účty','accounts'=>$accounts,'multi'=>$multi]);
+    }
+    public function bankConnect():void{
+        Auth::require(); $this->gate('bank'); Auth::verifyCsrf();
+        if(($_POST['provider']??'fio')!=='fio') Response::abort(422,'Neplatný bankovní provider.');
+        $token=trim((string)($_POST['token']??'')); if($token==='') Response::abort(422,'Zadejte Fio API token.');
+        $name=trim((string)($_POST['name']??'Fio účet')) ?: 'Fio účet';
+        $this->db->prepare('INSERT INTO bank_accounts(workspace_id,name,provider,token_encrypted,read_only,active) VALUES(?,?,?,?,1,1)')->execute([Auth::workspaceId(),$name,'fio',BankTokenService::encrypt($token)]);
+        $id=(int)$this->db->lastInsertId();
+        try{$rows=FioService::normalize(FioService::movementsFromLast($token));foreach($rows as $r){$q=$this->db->prepare('INSERT OR IGNORE INTO bank_transactions(workspace_id,bank_account_id,booked_at,amount,currency,counterparty,account_number,variable_symbol,constant_symbol,specific_symbol,reference,message,status,external_id,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');$q->execute([Auth::workspaceId(),$id,$r['booked_at'],$r['amount'],$r['currency'],$r['counterparty'],$r['account_number'],$r['variable_symbol'],$r['constant_symbol'],$r['specific_symbol'],$r['reference'],$r['message'],'unmatched',$r['external_id'],$r['raw_json']]);if($q->rowCount()){MatcherService::match($this->db,Auth::workspaceId(),(int)$this->db->lastInsertId());}}$this->db->prepare('UPDATE bank_accounts SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL WHERE id=? AND workspace_id=?')->execute([$id,Auth::workspaceId()]);}catch(\Throwable $e){$this->db->prepare('UPDATE bank_accounts SET last_error=? WHERE id=? AND workspace_id=?')->execute([$e->getMessage(),$id,Auth::workspaceId()]);}
+        Response::redirect('/bank/accounts');
+    }
+    public function bankSync(int $id):void{
+        Auth::require(); $this->gate('bank'); Auth::verifyCsrf();
+        $s=$this->db->prepare('SELECT * FROM bank_accounts WHERE id=? AND workspace_id=? AND active=1');$s->execute([$id,Auth::workspaceId()]);$a=$s->fetch();if(!$a)Response::abort(404,'Bankovní účet nenalezen.');
+        try{$token=BankTokenService::decrypt((string)$a['token_encrypted']);$rows=FioService::normalize(FioService::movementsFromLast($token));foreach($rows as $r){$q=$this->db->prepare('INSERT OR IGNORE INTO bank_transactions(workspace_id,bank_account_id,booked_at,amount,currency,counterparty,account_number,variable_symbol,constant_symbol,specific_symbol,reference,message,status,external_id,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');$q->execute([Auth::workspaceId(),$id,$r['booked_at'],$r['amount'],$r['currency'],$r['counterparty'],$r['account_number'],$r['variable_symbol'],$r['constant_symbol'],$r['specific_symbol'],$r['reference'],$r['message'],'unmatched',$r['external_id'],$r['raw_json']]);if($q->rowCount()){MatcherService::match($this->db,Auth::workspaceId(),(int)$this->db->lastInsertId());}}$this->db->prepare('UPDATE bank_accounts SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL WHERE id=? AND workspace_id=?')->execute([$id,Auth::workspaceId()]);}catch(\Throwable $e){$this->db->prepare('UPDATE bank_accounts SET last_error=? WHERE id=? AND workspace_id=?')->execute([$e->getMessage(),$id,Auth::workspaceId()]);}
+        Response::redirect('/bank/accounts');
+    }
+    public function bankSaltEdgeStart():void{
+        Auth::require(); $this->gate('bank'); Auth::verifyCsrf();
+        try{$existing=$this->db->prepare('SELECT customer_ref FROM bank_connections WHERE workspace_id=? AND provider="saltedge" AND customer_ref IS NOT NULL LIMIT 1');$existing->execute([Auth::workspaceId()]);$ref=$existing->fetchColumn();if(!$ref){$j=SaltEdgeService::customer('workspace-'.Auth::workspaceId().'-'.bin2hex(random_bytes(4)));$ref=$j['data']['id']??$j['data']['customer_id']??null;if(!$ref)throw new \RuntimeException('Salt Edge customer nebyl vytvořen.');$this->db->prepare('INSERT INTO bank_connections(workspace_id,provider,customer_ref,status) VALUES(?,?,?,?)')->execute([Auth::workspaceId(),'saltedge',(string)$ref,'pending']);}
+            $return=rtrim(Env::get('APP_URL',''),'/').'/bank/saltedge/callback'; if($return==='/bank/saltedge/callback') throw new \RuntimeException('APP_URL není nastaven.');
+            $j=SaltEdgeService::connectSession((int)$ref,$return,'cz');$url=$j['data']['connect_url']??$j['data']['url']??$j['connect_url']??null;if(!$url)throw new \RuntimeException('Salt Edge nevrátil připojovací URL.');Response::redirect($url);
+        }catch(\Throwable $e){Response::abort(502,'Salt Edge: '.$e->getMessage());}
+    }
+    public function admin():void{
+        Auth::requireRole(['owner','admin']);
+        $s=$this->db->prepare('SELECT * FROM subscriptions WHERE workspace_id=?');$s->execute([Auth::workspaceId()]);
+        $sub=$s->fetch()?:[];
+        $backup=['status'=>'Připraveno','message'=>'Záloha je dostupná v administraci.'];
+        View::render('admin/index',['title'=>'Administrace','subscription'=>$sub,'backup'=>$backup,'superAdmin'=>$this->isSuperAdmin()]);
+    }
+    public function subscription():void{
+        Auth::requireRole(['owner','admin']); Auth::verifyCsrf();
+        $interval=$_POST['interval']??'month'; if(!in_array($interval,['month','year'],true))Response::abort(422,'Neplatné období předplatného.');
+        $settings=$this->saasSettings(); $price=$interval==='year'?(float)$settings['yearly_price_czk']:(float)$settings['monthly_price_czk'];
+        try{$url=\App\Services\StripeService::checkout(Auth::workspaceId(),$interval.':'.$price,rtrim(Env::get('APP_URL',''),'/').'/admin/plans?success=1',rtrim(Env::get('APP_URL',''),'/').'/admin/plans?cancel=1');if(!$url)Response::abort(503,'Stripe není nakonfigurován.');Response::redirect($url);}catch(\Throwable $e){Response::abort(502,'Platbu se nepodařilo připravit: '.$e->getMessage());}
+    }
     public function bankSaltEdgeCallback():void{
         Auth::require();
         try{$customer=$this->db->prepare('SELECT customer_ref FROM bank_connections WHERE workspace_id=? AND provider="saltedge" LIMIT 1');$customer->execute([Auth::workspaceId()]);$ref=$customer->fetchColumn();if(!$ref)throw new \RuntimeException('Salt Edge customer nebyl nalezen.');$j=SaltEdgeService::connections((string)$ref);$rows=$j['data']??[];foreach($rows as $c){$this->db->prepare('INSERT OR REPLACE INTO bank_connections(id,workspace_id,provider,customer_ref,connection_ref,status,meta_json,updated_at) VALUES((SELECT id FROM bank_connections WHERE workspace_id=? AND connection_ref=?),?,?,?,?,?,?,CURRENT_TIMESTAMP)')->execute([Auth::workspaceId(),$c['id']??'',Auth::workspaceId(),'saltedge',(string)$ref,(string)($c['id']??''),$c['status']??'active',json_encode($c,JSON_UNESCAPED_UNICODE)]);}Response::redirect('/bank/accounts');}catch(\Throwable $e){Response::abort(422,'Bankovní připojení se nepodařilo dokončit: '.$e->getMessage());}
@@ -130,14 +188,122 @@ final class WebController {
     public function grantFree():void{Auth::require();if(!$this->isSuperAdmin())Response::abort(403,'Pouze Super Admin.');Auth::verifyCsrf();$wid=(int)$_POST['workspace_id'];$until=$_POST['free_until']??'';if(!$until)Response::abort(422,'Zadejte datum.');$this->db->prepare('UPDATE subscriptions SET status="free",plan="all",free_until=?,updated_at=CURRENT_TIMESTAMP WHERE workspace_id=?')->execute([$until.' 23:59:59',$wid]);$this->db->prepare('UPDATE workspaces SET plan="all",status="active" WHERE id=?')->execute([$wid]);Response::redirect('/admin/billing');}
     public function adminBilling():void{Auth::require();if(!$this->isSuperAdmin())Response::abort(403,'Pouze Super Admin.');$rows=$this->db->query('SELECT w.id,w.name,w.email_localpart,s.status,s.billing_interval,s.current_period_end,s.free_until FROM workspaces w LEFT JOIN subscriptions s ON s.workspace_id=w.id ORDER BY w.id DESC')->fetchAll();View::render('admin/billing',['title'=>'SaaS předplatné','settings'=>$this->saasSettings(),'workspaces'=>$rows]);}
     public function setPlan():void{Auth::requireRole(['owner','admin']);Auth::verifyCsrf();Response::abort(410,'Ruční změna tarifu je zakázána. Tarif se mění pouze přes Stripe předplatné.');}
-    public function qr(int $id):void{Auth::require();$s=$this->db->prepare('SELECT d.*,w.bank_account FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE d.id=? AND d.workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen.');$iban=preg_replace('/\s+/','',(string)$d['bank_account']);if(!$iban)Response::abort(422,'Ve firmě není nastaven bankovní účet.');$spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];if(!class_exists('Endroid\QrCode\QrCode'))Response::abort(500,'QR knihovna není nainstalována. Spusťte composer install.');$qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(360)->setMargin(10);$writer=new \Endroid\QrCode\Writer\PngWriter();$result=$writer->write($qr);header('Content-Type: '.$result->getMimeType());echo $result->getString();exit;}
+    private function normalizeIban(string $value):?string{
+        $v=strtoupper(preg_replace('/\s+/', '', trim($value)));
+        if($v==='') return null;
+        if(preg_match('/^CZ[0-9]{22}$/',$v)){
+            $check=substr($v,2,2); $bban=substr($v,4); $num=$bban.'1235'.$check; $rem=0;
+            for($i=0,$n=strlen($num);$i<$n;$i++) $rem=(($rem*10)+(int)$num[$i])%97;
+            return $rem===1?$v:null;
+        }
+        if(preg_match('/^(?:(\d{1,10})-)?(\d{1,10})\/(\d{4})$/',$v,$m)){
+            $prefix=str_pad($m[1]??'',6,'0',STR_PAD_LEFT); $account=str_pad($m[2],10,'0',STR_PAD_LEFT); $bban=$m[3].$prefix.$account;
+            $num=$bban.'123500'; $rem=0;
+            for($i=0,$n=strlen($num);$i<$n;$i++) $rem=(($rem*10)+(int)$num[$i])%97;
+            return 'CZ'.str_pad((string)(98-$rem),2,'0',STR_PAD_LEFT).$bban;
+        }
+        return null;
+    }
 
-    public function goPayLink(int $id):void{Auth::require();Auth::verifyCsrf();$s=$this->db->prepare('SELECT d.*,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Faktura nenalezena.');try{$p=GoPayService::createPayment(['amount'=>(int)round($d['total_with_vat']*100),'currency'=>'CZK','order_number'=>$d['doc_number'],'order_description'=>'Faktura '.$d['doc_number'],'items'=>[['name'=>'Faktura '.$d['doc_number'],'amount'=>(int)round($d['total_with_vat']*100),'count'=>1]],'callback'=>['return_url'=>rtrim(Env::get('APP_URL',''),'/').'/documents','notification_url'=>rtrim(Env::get('APP_URL',''),'/').'/gopay/webhook'],'payer'=>['contact'=>['email'=>$d['email']??Env::get('MAIL_FROM','')]]]);$url=GoPayService::gatewayUrl($p);if(!$url)throw new \RuntimeException('GoPay nevrátil platební URL.');Response::redirect($url);}catch(\Throwable $e){Response::abort(502,'GoPay: '.$e->getMessage());}}
+    public function qr(int $id):void{
+        Auth::require();
+        $s=$this->db->prepare('SELECT d.*,w.bank_account FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE d.id=? AND d.workspace_id=?');
+        $s->execute([$id,Auth::workspaceId()]); $d=$s->fetch();
+        if(!$d) Response::abort(404,'Doklad nenalezen.');
+        $iban=$this->normalizeIban((string)$d['bank_account']);
+        if(!$iban) Response::abort(422,'Ve firmě není nastaven platný IBAN ani český účet ve formátu číslo/kód banky.');
+        $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
+        if(!class_exists('Endroid\QrCode\QrCode')) Response::abort(500,'QR knihovna není nainstalována. Spusťte composer install.');
+        $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(360)->setMargin(10);
+        $writer=new \Endroid\QrCode\Writer\PngWriter(); $result=$writer->write($qr);
+        header('Content-Type: '.$result->getMimeType()); echo $result->getString(); exit;
+    }
+
+    public function goPayLink(int $id):void{
+        Auth::require(); Auth::verifyCsrf();
+        $s=$this->db->prepare('SELECT d.*,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');
+        $s->execute([$id,Auth::workspaceId()]); $d=$s->fetch();
+        if(!$d) Response::abort(404,'Faktura nenalezena.');
+        try{
+            $base=rtrim(Env::get('APP_URL',''),'/');
+            $p=GoPayService::createPayment([
+                'amount'=>(int)round($d['total_with_vat']*100),
+                'currency'=>'CZK',
+                'order_number'=>$d['doc_number'],
+                'order_description'=>'Faktura '.$d['doc_number'],
+                'items'=>[['name'=>'Faktura '.$d['doc_number'],'amount'=>(int)round($d['total_with_vat']*100),'count'=>1]],
+                'callback'=>[
+                    'return_url'=>$base.'/gopay/callback?doc='.(int)$d['id'],
+                    'notification_url'=>$base.'/gopay/webhook'
+                ],
+                'payer'=>['contact'=>['email'=>$d['email']??Env::get('MAIL_FROM','')]]
+            ]);
+            $pid=(int)($p['id']??$p['data']['id']??0);
+            if(!$pid) throw new \RuntimeException('GoPay nevrátil ID platby.');
+            $this->db->prepare('UPDATE documents SET gopay_payment_id=? WHERE id=? AND workspace_id=?')->execute([$pid,(int)$d['id'],Auth::workspaceId()]);
+            $url=GoPayService::gatewayUrl($p);
+            if(!$url) throw new \RuntimeException('GoPay nevrátil platební URL.');
+            Response::redirect($url);
+        }catch(\Throwable $e){Response::abort(502,'GoPay: '.$e->getMessage());}
+    }
+
+    private function processGoPayPayment(int $paymentId):bool{
+        if($paymentId<=0) return false;
+        $p=GoPayService::getPayment($paymentId);
+        $status=$p['state']??$p['data']['state']??null;
+        if(!in_array($status,['PAID','AUTHORIZED'],true)) return false;
+        $order=(string)($p['order_number']??$p['data']['order_number']??'');
+        if($order==='') return false;
+        $q=$this->db->prepare('SELECT * FROM documents WHERE doc_number=? ORDER BY id DESC LIMIT 1');
+        $q->execute([$order]); $d=$q->fetch();
+        if(!$d) return false;
+        $exists=$this->db->prepare("SELECT id FROM payments WHERE document_id=? AND source='gopay' LIMIT 1");
+        $exists->execute([(int)$d['id']]);
+        if(!$exists->fetchColumn()){
+            $this->db->prepare('INSERT INTO payments(workspace_id,document_id,amount,paid_at,method,source) VALUES(?,?,?,?,?,?)')
+                ->execute([(int)$d['workspace_id'],(int)$d['id'],(float)$d['total_with_vat'],date('Y-m-d'),'gopay','gopay']);
+        }
+        if((int)($d['gopay_payment_id']??0)!==$paymentId){
+            $this->db->prepare('UPDATE documents SET gopay_payment_id=? WHERE id=?')->execute([$paymentId,(int)$d['id']]);
+        }
+        DocumentService::refreshPaymentStatus($this->db,(int)$d['workspace_id'],(int)$d['id']);
+        return true;
+    }
+
+    public function goPayCallback():void{
+        $id=(int)($_GET['id']??0);
+        if(!$id){
+            $docId=(int)($_GET['doc']??0);
+            if($docId){
+                $q=$this->db->prepare('SELECT gopay_payment_id FROM documents WHERE id=? LIMIT 1');
+                $q->execute([$docId]); $id=(int)$q->fetchColumn();
+            }
+        }
+        try{$this->processGoPayPayment($id);}catch(\Throwable $e){}
+        if(Auth::check()) Response::redirect('/documents');
+        Response::redirect('/login');
+    }
+
+    public function goPayWebhook():void{
+        $raw=(string)file_get_contents('php://input'); $j=json_decode($raw,true);
+        $id=(int)($_GET['id']??$_POST['id']??($j['id']??($j['payment']['id']??0)));
+        if(!$id){
+            http_response_code(400); header('Content-Type: application/json');
+            echo json_encode(['ok'=>false,'error'=>'missing payment id']); return;
+        }
+        try{
+            $ok=$this->processGoPayPayment($id);
+            http_response_code($ok?200:202); header('Content-Type: application/json');
+            echo json_encode(['ok'=>$ok]);
+        }catch(\Throwable $e){
+            http_response_code(500); header('Content-Type: application/json');
+            echo json_encode(['ok'=>false]);
+        }
+    }
 
     public function communicationSave(int $id):void{Auth::require();Auth::verifyCsrf();$s=$this->db->prepare('SELECT id FROM customers WHERE id=? AND workspace_id=?');$s->execute([$id,Auth::workspaceId()]);if(!$s->fetchColumn())Response::abort(404,'Zákazník nenalezen.');$this->db->prepare('INSERT INTO customer_communications(workspace_id,customer_id,channel,direction,subject,message,created_by) VALUES(?,?,?,?,?,?,?)')->execute([Auth::workspaceId(),$id,$_POST['channel']??'note','internal',$_POST['subject']??null,$_POST['message']??null,Auth::id()]);Response::redirect('/customers/'.$id);}
     public function automation():void{Auth::requireRole(['owner','admin']);$rows=$this->scope('SELECT * FROM automation_rules WHERE workspace_id=? ORDER BY created_at DESC');View::render('automation/index',['title'=>'Automatizace','rules'=>$rows]);}
     public function automationSave():void{Auth::requireRole(['owner','admin']);Auth::verifyCsrf();$this->db->prepare('INSERT INTO automation_rules(workspace_id,name,trigger_type,action_type,config_json,active) VALUES(?,?,?,?,?,1)')->execute([Auth::workspaceId(),$_POST['name'],$_POST['trigger_type'],$_POST['action_type'],json_encode(['days'=>(int)($_POST['days']??0)],JSON_UNESCAPED_UNICODE)]);Response::redirect('/automation');}
     public function isdoc(int $id):void{Auth::require();$s=$this->db->prepare('SELECT d.*,c.company_name,c.first_name,c.last_name,c.street,c.city,c.zip,c.ico,c.dic FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen.');$q=$this->db->prepare('SELECT * FROM document_items WHERE document_id=?');$q->execute([$id]);$items=$q->fetchAll();$xml='<?xml version="1.0" encoding="UTF-8"?><Invoice xmlns="http://isdoc.cz/namespace/2013"><DocumentType>1</DocumentType><ID>'.htmlspecialchars($d['doc_number'],ENT_XML1).'</ID><IssueDate>'.htmlspecialchars($d['issue_date'],ENT_XML1).'</IssueDate><VATApplicable>'.((float)$d['total_vat']>0?'true':'false').'</VATApplicable><TaxInclusiveAmount>'.number_format((float)$d['total_with_vat'],2,'.','').'</TaxInclusiveAmount><Items>';foreach($items as $it)$xml.='<Item><Description>'.htmlspecialchars($it['name'],ENT_XML1).'</Description><Quantity>'.(float)$it['quantity'].'</Quantity><UnitPrice>'.number_format((float)$it['unit_price'],2,'.','').'</UnitPrice><VATRate>'.(float)$it['vat_rate'].'</VATRate></Item>';$xml.='</Items></Invoice>';header('Content-Type: application/xml; charset=UTF-8');header('Content-Disposition: attachment; filename="'.$d['doc_number'].'.isdoc"');echo $xml;exit;}
-    public function goPayCallback():void{Auth::require();$id=(int)($_GET['id']??0);if(!$id)Response::redirect('/documents');try{$p=GoPayService::getPayment($id);$status=$p['state']??$p['data']['state']??null;if(in_array($status,['PAID','AUTHORIZED'],true)){ $order=(string)($p['order_number']??$p['data']['order_number']??'');$q=$this->db->prepare('SELECT * FROM documents WHERE workspace_id=? AND doc_number=?');$q->execute([Auth::workspaceId(),$order]);$d=$q->fetch();if($d){$this->db->prepare('INSERT INTO payments(workspace_id,document_id,amount,paid_at,method,source) VALUES(?,?,?,?,?,?)')->execute([Auth::workspaceId(),$d['id'],$d['total_with_vat'],date('Y-m-d'),'gopay','gopay']);DocumentService::refreshPaymentStatus($this->db,Auth::workspaceId(),$d['id']);}}}catch(\Throwable $e){}Response::redirect('/documents');}
 
 }

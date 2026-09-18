@@ -1,14 +1,33 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__).'/vendor/autoload.php';require dirname(__DIR__).'/src/bootstrap.php';
-use App\Core\Database;use App\Core\Env;use App\Services\{MatcherService,DocumentService,MailerService,FioService};
+use App\Core\Database;use App\Services\{MatcherService,DocumentService,MailerService,FioService,BankTokenService};
 $pdo=Database::pdo();
 // Bank sync: only explicitly connected accounts; Fio token is read-only by design.
 $accounts=$pdo->query("SELECT * FROM bank_accounts WHERE active=1 AND provider='fio'")->fetchAll();
-foreach($accounts as $a){try{$key=hash('sha256',Env::get('APP_KEY','change-me'),true);$raw=base64_decode($a['token_encrypted'],true)?:'';$token=function_exists('sodium_crypto_secretbox_open')?(sodium_crypto_secretbox_open($raw,str_repeat("\0",SODIUM_CRYPTO_SECRETBOX_NONCEBYTES),$key)?:''):$raw;if(!$token)throw new RuntimeException('Nelze rozšifrovat token');$data=FioService::movementsFromLast($token);foreach(FioService::normalize($data) as $r){$st=$pdo->prepare('INSERT OR IGNORE INTO bank_transactions(workspace_id,bank_account_id,booked_at,amount,currency,counterparty,account_number,variable_symbol,constant_symbol,specific_symbol,reference,message,status,external_id,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');$st->execute([$a['workspace_id'],$a['id'],$r['booked_at'],$r['amount'],$r['currency'],$r['counterparty'],$r['account_number'],$r['variable_symbol'],$r['constant_symbol'],$r['specific_symbol'],$r['reference'],$r['message'],'unmatched',$r['external_id'],$r['raw_json']]);if($st->rowCount())MatcherService::match($pdo,(int)$a['workspace_id'],(int)$pdo->lastInsertId());}$pdo->prepare('UPDATE bank_accounts SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL WHERE id=?')->execute([$a['id']]);}catch(Throwable $e){$pdo->prepare('UPDATE bank_accounts SET last_error=? WHERE id=?')->execute([$e->getMessage(),$a['id']]);}}
+foreach($accounts as $a){try{$token=BankTokenService::decrypt((string)$a['token_encrypted']);$data=FioService::movementsFromLast($token);foreach(FioService::normalize($data) as $r){$st=$pdo->prepare('INSERT OR IGNORE INTO bank_transactions(workspace_id,bank_account_id,booked_at,amount,currency,counterparty,account_number,variable_symbol,constant_symbol,specific_symbol,reference,message,status,external_id,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');$st->execute([$a['workspace_id'],$a['id'],$r['booked_at'],$r['amount'],$r['currency'],$r['counterparty'],$r['account_number'],$r['variable_symbol'],$r['constant_symbol'],$r['specific_symbol'],$r['reference'],$r['message'],'unmatched',$r['external_id'],$r['raw_json']]);if($st->rowCount())MatcherService::match($pdo,(int)$a['workspace_id'],(int)$pdo->lastInsertId());}$pdo->prepare('UPDATE bank_accounts SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL WHERE id=?')->execute([$a['id']]);}catch(Throwable $e){$pdo->prepare('UPDATE bank_accounts SET last_error=? WHERE id=?')->execute([$e->getMessage(),$a['id']]);}}
 // Recurring invoices and basic reminders.
 $rows=$pdo->query("SELECT * FROM recurring_invoices WHERE active=1 AND next_run<=date('now') LIMIT 100")->fetchAll();
-foreach($rows as $r){try{$id=DocumentService::createFromTemplate($pdo,$r);$next=$r['interval_type']==='year'?'+'.(int)$r['interval_value'].' years':($r['interval_type']==='quarter'?'+'.((int)$r['interval_value']*3).' months':'+'.(int)$r['interval_value'].' months');$pdo->prepare("UPDATE recurring_invoices SET next_run=date(next_run,?) WHERE id=?")->execute([$next,$r['id']]);if($id&&$r['send_email']){ $s=$pdo->prepare('SELECT email FROM customers WHERE id=? AND workspace_id=?');$s->execute([$r['customer_id'],$r['workspace_id']]);$email=$s->fetchColumn();if($email)$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,status) VALUES(?,?,?,?,?)')->execute([$r['workspace_id'],$email,'Nová faktura','Byla vytvořena nová pravidelná faktura č. '.$id,'queued']);}}catch(Throwable $e){error_log($e->getMessage());}}
+foreach($rows as $r){try{$id=DocumentService::createFromTemplate($pdo,$r);$intervalType=(string)$r['interval_type'];
+        $intervalValue=max(1,(int)$r['interval_value']);
+        $currentDate=new DateTimeImmutable((string)$r['next_run']);
+        $lastDayOfMonth=$currentDate->modify('last day of this month')->format('Y-m-d');
+        $isMonthEnd=$currentDate->format('Y-m-d')===$lastDayOfMonth;
+        if($intervalType==='year'){
+            $months=$intervalValue*12;
+        }elseif($intervalType==='quarter'){
+            $months=$intervalValue*3;
+        }else{
+            $months=$intervalValue;
+        }
+        if($isMonthEnd){
+            $nextDate=$currentDate->modify('first day of this month')->modify('+'.$months.' months')->modify('last day of this month');
+        }else{
+            $nextDate=$intervalType==='year'
+                ? $currentDate->modify('+'.$intervalValue.' years')
+                : $currentDate->modify('+'.$months.' months');
+        }
+        $pdo->prepare('UPDATE recurring_invoices SET next_run=? WHERE id=?')->execute([$nextDate->format('Y-m-d'),$r['id']]);if($id&&$r['send_email']){ $s=$pdo->prepare('SELECT email FROM customers WHERE id=? AND workspace_id=?');$s->execute([$r['customer_id'],$r['workspace_id']]);$email=$s->fetchColumn();if($email)$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,status) VALUES(?,?,?,?,?)')->execute([$r['workspace_id'],$email,'Nová faktura','Byla vytvořena nová pravidelná faktura č. '.$id,'queued']);}}catch(Throwable $e){error_log($e->getMessage());}}
 // Payment statuses.
 $pdo->exec("UPDATE documents SET payment_status='overdue' WHERE doc_type IN ('invoice','proforma') AND payment_status='unpaid' AND due_date<date('now')");
 // Scheduled invoice reminders with deduplication.

@@ -24,7 +24,7 @@ final class Kernel {
         $r->get('/expenses',fn()=> $w->expenses()); $r->post('/expenses/save',fn()=> $w->expenseSave());
         $r->get('/products',fn()=> $w->products()); $r->post('/products/save',fn()=> $w->productSave()); $r->post('/products/move',fn()=> $w->stockMove());
         $r->post('/products/inventory-count',fn()=> $w->inventoryCount()); $r->get('/products/{id}/edit',fn($id)=>$w->productEdit((int)$id)); $r->post('/products/{id}/update',fn($id)=>$w->productUpdate((int)$id));
-        $r->get('/bank',fn()=> $w->bank()); $r->post('/bank/gopay/{id}',fn($id)=>$w->goPayLink((int)$id)); $r->get('/gopay/callback',fn()=> $w->goPayCallback()); $r->post('/bank/import',fn()=> $w->bankImport()); $r->post('/bank/match/{id}',fn($id)=>$w->bankMatch((int)$id)); $r->get('/bank/accounts',fn()=> $w->bankSettings()); $r->post('/bank/accounts',fn()=> $w->bankConnect()); $r->post('/bank/accounts/{id}/sync',fn($id)=>$w->bankSync((int)$id));
+        $r->get('/bank',fn()=> $w->bank()); $r->post('/bank/gopay/{id}',fn($id)=>$w->goPayLink((int)$id)); $r->get('/gopay/callback',fn()=> $w->goPayCallback()); $r->post('/gopay/webhook',fn()=> $w->goPayWebhook()); $r->post('/bank/import',fn()=> $w->bankImport()); $r->post('/bank/match/{id}',fn($id)=>$w->bankMatch((int)$id)); $r->get('/bank/accounts',fn()=> $w->bankSettings()); $r->post('/bank/accounts',fn()=> $w->bankConnect()); $r->post('/bank/accounts/{id}/sync',fn($id)=>$w->bankSync((int)$id));
         $r->post('/bank/saltedge/connect',fn()=> $w->bankSaltEdgeStart());
         $r->get('/bank/saltedge/callback',fn()=> $w->bankSaltEdgeCallback());
         $r->post('/bank/saltedge/{id}/sync',fn($id)=> $w->bankSaltEdgeSync((int)$id));

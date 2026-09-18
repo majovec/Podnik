@@ -4,6 +4,7 @@ final class View {
     public static function render(string $view,array $data=[]): void {
         extract($data); $file=dirname(__DIR__).'/Views/'.$view.'.php';
         if(!is_file($file)) Response::abort(500,'View not found');
+        if ($view === 'landing') { include $file; return; }
         include dirname(__DIR__).'/Views/layouts/app.php';
     }
     public static function e(mixed $v): string{return htmlspecialchars((string)$v,ENT_QUOTES,'UTF-8');}

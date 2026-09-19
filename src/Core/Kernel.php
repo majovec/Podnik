@@ -13,6 +13,8 @@ final class Kernel {
         $r->get('/health',function(){header('Content-Type: application/json');echo json_encode(['ok'=>true,'app'=>\App\Core\Env::get('APP_NAME','Byznio'),'time'=>date(DATE_ATOM)]);exit;});
         $r->get('/mail/logo/{id}',function($id){ $wid=(int)$id; $token=(string)($_GET['token']??''); $expected=hash_hmac('sha256',(string)$wid,(string)\App\Core\Env::get('APP_KEY','')); if($wid<1||$token===''||!hash_equals($expected,$token)){http_response_code(404);exit;} $pdo=\App\Core\Database::pdo(); $s=$pdo->prepare('SELECT logo_path FROM workspaces WHERE id=?'); $s->execute([$wid]); $path=$s->fetchColumn(); $file=$path?dirname(__DIR__,2).'/'.ltrim((string)$path,'/'):''; if(!$file||!is_file($file)){http_response_code(404);exit;} $mime=(new \finfo(FILEINFO_MIME_TYPE))->file($file); if(!in_array($mime,['image/png','image/jpeg','image/svg+xml'],true)){http_response_code(404);exit;} header('Content-Type: '.$mime); header('Cache-Control: public, max-age=86400'); readfile($file); exit; });
         $r->get('/',fn()=> Auth::check() ? $w->dashboard() : $w->landing());
+        $r->get('/dashboard',fn()=> $w->dashboard());
+        $r->get('/crm',fn()=> $w->customers());
         $r->get('/login',fn()=> $w->login()); $r->post('/login',fn()=> $w->loginPost());
         $r->get('/register',fn()=> $w->register()); $r->post('/register',fn()=> $w->registerPost());
         $r->post('/logout',fn()=> $w->logout());

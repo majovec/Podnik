@@ -1,8 +1,5 @@
-# Byznio V18 – targeted runtime repair
+# v18 route repair
 
-This build preserves the V18 design and Nia/onboarding implementation.
-Targeted repairs:
-- Fully-qualified App\Core\View references in landing.php.
-- Conservative /dashboard and /crm route aliases when matching controller methods/routes existed.
-
-No intentional visual redesign was made.
+- Added explicit `/dashboard` route to `WebController::dashboard()`.
+- Added explicit `/crm` alias to `WebController::customers()`.
+- No VPS-side changes are included; deploy by replacing the GitHub project contents and then pulling on the VPS.

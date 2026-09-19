@@ -31,7 +31,11 @@ $current=$steps[$step];
       <?php elseif($step===7): ?>
         <p>Teď už znáš základní mapu Byznia. Nia zůstane s tebou i po dokončení průvodce.</p><div class="guide-tip">💬 Kliknutím na panáčka vpravo dole kdykoli otevřeš bublinu a můžeš mu napsat vlastní požadavek.</div><div class="tour-actions"><form method="post" action="/uvod/complete"><input type="hidden" name="_csrf" value="<?=App\Core\Auth::csrf()?>"><button class="btn primary" type="submit">Dokončit a otevřít Byznio</button></form><a class="btn" href="/uvod?step=6">← Zpět</a></div>
       <?php else: ?>
-        <p><?=View::e($current['text'])?></p><div class="feature-row"><div class="feature"><b>Propojené workflow</b><span>Zákazník → nabídka → zakázka → faktura → banka → platba.</span></div><div class="feature"><b>Automatizace</b><span>Upomínky, opakované faktury, párování plateb a přehledy.</span></div><div class="feature"><b>Finance</b><span>Výdaje, cashflow, sklad a daňové podklady na jednom místě.</span></div><div class="feature"><b>Nia</b><span>Pomoc s přehledem, návrhy a akcemi, které vždy nejdřív potvrdíš.</span></div></div><div class="tour-actions"><a class="btn primary" href="/uvod?step=<?=$step+1?>">Ukázat další část →</a><a class="btn" href="/uvod?step=<?=$step-1?>">← Zpět</a></div>
+        <p><?=View::e($current['text'])?></p><div class="feature-row"><div class="feature"><b>Propojené workflow</b><span>Zákazník → nabídka → zakázka → faktura → banka → platba.</span></div><div class="feature"><b>Automatizace</b><span>Upomínky, opakované faktury, párování plateb a přehledy.</span></div><div class="feature"><b>Finance</b><span>Výdaje, cashflow, sklad a daňové podklady na jednom místě.</span></div><div class="feature"><b>Nia</b><span>Pomoc s přehledem, návrhy a akcemi, které vždy nejdřív potvrdíš.</span></div></div><div class="tour-actions">
+<?php $tourRoutes=[2=>'/customers?tour=2&next=3',3=>'/documents?tour=3&next=4',4=>'/jobs?tour=4&next=5',5=>'/bank?tour=5&next=6',6=>'/calendar?tour=6&next=7']; ?>
+<a class="btn primary" href="<?=$tourRoutes[$step]??('/uvod?step='.($step+1))?>">Ukázat skutečnou obrazovku →</a>
+<a class="btn" href="/uvod?step=<?=$step-1?>">← Zpět</a>
+</div>
       <?php endif; ?>
     </div>
   </div>

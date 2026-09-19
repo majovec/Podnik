@@ -40,8 +40,8 @@ final class WebController {
         Auth::require();
         if(!$this->needsOnboarding())Response::redirect('/');
         $s=$this->db->prepare('SELECT name,ico,dic,street,city,zip FROM workspaces WHERE id=?');$s->execute([Auth::workspaceId()]);$workspace=$s->fetch()?:[];
-        $step=max(1,min(7,(int)($_GET['step']??1)));
-        View::render('onboarding/index',['title'=>'Začínáme s Byzniem','workspace'=>$workspace,'step'=>$step,'assistant_name'=>'Nia']);
+        $step=max(1,min(14,(int)($_GET['step']??1)));
+        View::render('onboarding/index',['title'=>'Průvodce Byzniem','workspace'=>$workspace,'step'=>$step,'assistant_name'=>'Nia']);
     }
     public function onboardingCompany():void{
         Auth::require();Auth::verifyCsrf();

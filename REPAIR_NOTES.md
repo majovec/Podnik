@@ -1,5 +1,8 @@
-# v18 route repair
+Byznio v23 – návrat mobilního landing page + funkční mobilní menu + průvodce
 
-- Added explicit `/dashboard` route to `WebController::dashboard()`.
-- Added explicit `/crm` alias to `WebController::customers()`.
-- No VPS-side changes are included; deploy by replacing the GitHub project contents and then pulling on the VPS.
+- Mobilní landing page je znovu samostatně navržený: tmavý hero, CTA, mobilní dashboard/finanční přehled a následné sekce.
+- Desktopový landing layout zůstává zachovaný.
+- Mobilní hamburger menu má explicitní JavaScript fallback a ne تعتمدí pouze na CSS :has().
+- Zavření menu funguje přes tlačítko, kliknutí mimo panel i navigaci.
+- Onboarding zachovává 7 kroků, skutečné odkazy do aplikace a návrat na další krok.
+- Nia zůstává v aplikaci jako pomocník; průvodce nenahrazuje mobilní landing.

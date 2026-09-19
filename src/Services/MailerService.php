@@ -2,9 +2,36 @@
 namespace App\Services;
 use App\Core\Env;
 final class MailerService {
-    public static function send(string $to,string $subject,string $body,?string $attachment=null,?string $from=null,?string $name=null):bool {
-        $from=$from?:Env::get('MAIL_FROM'); if(!$from)return false; $name=$name?:Env::get('MAIL_FROM_NAME','Byznio');
-        if(!$attachment){$headers='From: '.sprintf('"%s" <%s>',$name,$from)."\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n";return mail($to,$subject,$body,$headers);}
-        $file=@file_get_contents($attachment);if($file===false)return false;$boundary=bin2hex(random_bytes(12));$headers='From: '.sprintf('"%s" <%s>',$name,$from)."\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"$boundary\"\r\n";$content="--$boundary\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n$body\r\n--$boundary\r\nContent-Type: application/pdf; name=\"".basename($attachment)."\"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=\"".basename($attachment)."\"\r\n\r\n".chunk_split(base64_encode($file))."\r\n--$boundary--";return mail($to,$subject,$content,$headers);
+    private static string $lastError='';
+    private static function shell(string $content,string $name,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null):string{
+        $safeName=htmlspecialchars($name,ENT_QUOTES,'UTF-8');
+        $appUrl=rtrim(Env::get('APP_URL',''),'/');
+        $logo=$appUrl.'/assets/byznio-logo.svg';
+        if($logoPath && $workspaceId){$token=hash_hmac('sha256',(string)$workspaceId,(string)Env::get('APP_KEY',''));$logo=$appUrl.'/mail/logo/'.(int)$workspaceId.'?token='.$token;}
+        $button=$actionUrl?'<p style="margin:28px 0"><a href="'.htmlspecialchars($actionUrl,ENT_QUOTES,'UTF-8').'" style="display:inline-block;padding:12px 20px;background:#1677ee;color:#fff;text-decoration:none;border-radius:10px;font-weight:700">Otevřít v Byzniu</a></p>':'';
+        return '<!doctype html><html lang="cs"><body style="margin:0;background:#f5f8fc;font-family:Arial,sans-serif;color:#10213f"><div style="max-width:620px;margin:32px auto;padding:0 16px"><div style="background:#071a3a;padding:22px 26px;border-radius:18px 18px 0 0"><img src="'.htmlspecialchars($logo,ENT_QUOTES,'UTF-8').'" alt="'.$safeName.'" style="width:150px;max-width:100%;max-height:64px;object-fit:contain"></div><div style="background:#fff;padding:30px 26px;border:1px solid #e5eaf2;border-top:0;border-radius:0 0 18px 18px"><p style="margin-top:0">Dobrý den,</p>'.$content.$button.'<p style="color:#6c7890;font-size:12px;margin-bottom:0">'.$safeName.' · Byznio</p></div></div></body></html>';
+    }
+    private static function html(string $body,string $name,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null):string{
+        return self::shell('<div style="font-size:15px;line-height:1.7">'.nl2br(htmlspecialchars($body,ENT_QUOTES,'UTF-8')).'</div>',$name,$actionUrl,$logoPath,$workspaceId);
+    }
+    public static function reportHtml(string $htmlBody,string $name,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null):string{
+        return self::shell($htmlBody,$name,$actionUrl,$logoPath,$workspaceId);
+    }
+    public static function lastError():string{return self::$lastError;}
+    private static function deliver(string $to,string $subject,string $body,string $html,?string $attachment,?string $from,?string $name):bool{
+        self::$lastError='';$token=trim((string)Env::get('POSTMARK_SERVER_TOKEN',''));
+        if($token===''){self::$lastError='POSTMARK_SERVER_TOKEN není nastaven.';return false;}
+        $from=$from?:Env::get('MAIL_FROM');if(!$from){self::$lastError='MAIL_FROM není nastaven.';return false;}$name=$name?:Env::get('MAIL_FROM_NAME','Byznio');
+        $payload=['From'=>$name.' <'.$from.'>','To'=>$to,'Subject'=>$subject,'TextBody'=>$body,'HtmlBody'=>$html,'MessageStream'=>Env::get('POSTMARK_MESSAGE_STREAM','outbound')];
+        if($attachment){$file=@file_get_contents($attachment);if($file===false){self::$lastError='Přílohu se nepodařilo načíst.';return false;}$payload['Attachments']=[['Name'=>basename($attachment),'Content'=>base64_encode($file),'ContentType'=>'application/pdf']];}
+        $ch=curl_init('https://api.postmarkapp.com/email');curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>['Accept: application/json','Content-Type: application/json','X-Postmark-Server-Token: '.$token],CURLOPT_POSTFIELDS=>json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),CURLOPT_CONNECTTIMEOUT=>10,CURLOPT_TIMEOUT=>30,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2]);
+        $response=curl_exec($ch);$errno=curl_errno($ch);$error=curl_error($ch);$http=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);curl_close($ch);
+        if($response===false){self::$lastError='Postmark cURL chyba '.$errno.': '.$error;return false;}if($http<200||$http>=300){$decoded=json_decode($response,true);self::$lastError='Postmark HTTP '.$http.': '.($decoded['Message']??$response);return false;}return true;
+    }
+    public static function send(string $to,string $subject,string $body,?string $attachment=null,?string $from=null,?string $name=null,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null):bool{
+        return self::deliver($to,$subject,$body,self::html($body,$name?:Env::get('MAIL_FROM_NAME','Byznio'),$actionUrl,$logoPath,$workspaceId),$attachment,$from,$name);
+    }
+    public static function sendReport(string $to,string $subject,string $body,string $reportHtml,?string $from=null,?string $name=null,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null):bool{
+        $name=$name?:Env::get('MAIL_FROM_NAME','Byznio');return self::deliver($to,$subject,$body,self::reportHtml($reportHtml,$name,$actionUrl,$logoPath,$workspaceId),null,$from,$name);
     }
 }

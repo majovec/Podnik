@@ -24,9 +24,9 @@ Moderní český SaaS pro OSVČ a malé firmy: CRM, zakázky, fakturace, banky, 
 - AI asistent: firemní kontext, návrhy a potvrzované akce; aktuálně bezpečně podporuje vytvoření zákazníka a faktury
 - Automatizace: platby, upomínky, nízký sklad, překročení rozpočtu → úkoly/notifikace
 - API + vytvoření prvního API klíče přes web; GET/POST/PUT/DELETE pro zákazníky a doklady
-- Tarify a feature gating
+- Jednotné předplatné 300 Kč/měsíc a kontrola aktivního předplatného
 - Stripe subscription checkout + podepsané/idempotentní webhooky
-- GoPay payment gateway pro faktury
+- GoPay payment gateway pro faktury, připojitelný samostatně pro každou firmu
 - Mobile-first UI
 - CSRF, prepared statements, tenant scoping, upload MIME/size guard, audit, základní rate-limit loginu
 
@@ -43,7 +43,7 @@ Moderní český SaaS pro OSVČ a malé firmy: CRM, zakázky, fakturace, banky, 
 - Multi-bank Open Banking: `SALTEDGE_APP_ID`, `SALTEDGE_SECRET`
 - AI/OCR: `AI_API_KEY`, případně `AI_VISION_MODEL`
 - Stripe SaaS: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_*`
-- GoPay: `GOPAY_GOID`, `GOPAY_CLIENT_ID`, `GOPAY_CLIENT_SECRET`, `GOPAY_BASE_URL`
+- GoPay: `GOPAY_BASE_URL` (GOID/Client ID/Client Secret se zadávají a šifrovaně ukládají pro každou firmu v Nastavení)
 - E-mail: `MAIL_FROM` / serverní mail transport
 
 ## Worker
@@ -69,3 +69,7 @@ Aplikace umí vytvořit konzistentní SQLite backup přes `VACUUM INTO`, gzipova
 
 ### Produkční databáze
 V9 stále používá SQLite jako runtime databázi. Pro přechod na PostgreSQL je potřeba samostatná migrační fáze, protože část dotazů používá SQLite-specific SQL funkce. V9 proto PostgreSQL nepředstírá jako hotovou kompatibilní volbu.
+
+
+## Předplatné
+Byznio používá jeden tarif 300 Kč měsíčně. Stripe slouží pro checkout a zákaznický portál; zrušení předplatného se provádí ke konci aktuálního období.

@@ -9,6 +9,7 @@ final class BackupService {
   $db->exec('VACUUM INTO '. $db->quote($file));
   $gz=$file.'.gz'; $in=fopen($file,'rb'); $out=gzopen($gz,'wb9'); while(!feof($in)) gzwrite($out,fread($in,1048576)); fclose($in); gzclose($out); @unlink($file);
   $hash=hash_file('sha256',$gz); $remote=self::remote($gz);
+  $keep=max(1,(int)Env::get('BACKUP_RETENTION_DAYS','30'));foreach(glob($dir.'/*.gz')?:[] as $old)if($old!==$gz && filemtime($old)<time()-$keep*86400)@unlink($old);
   return ['file'=>$gz,'sha256'=>$hash,'bytes'=>(int)filesize($gz),'remote'=>$remote];
  }
  private static function remote(string $file): string {

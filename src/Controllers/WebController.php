@@ -43,7 +43,9 @@ final class WebController {
     }
     public function onboarding():void{
         Auth::require();
-        Response::redirect('/');
+        // /uvod is the explicit entry point to the visual Nia tour.
+        // It must work even for an existing workspace that already completed onboarding.
+        Response::redirect('/?tour=1');
     }
     public function onboardingCompany():void{
         Auth::require();Auth::verifyCsrf();

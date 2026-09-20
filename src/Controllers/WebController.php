@@ -28,7 +28,7 @@ final class WebController {
         try{$this->db->beginTransaction();$local=$this->makeEmailLocalpart($company);$this->db->prepare('INSERT INTO workspaces(name,plan,status,email_localpart) VALUES(?,?,?,?)')->execute([$company,'all','trial',$local]);
             $wid=(int)$this->db->lastInsertId();$this->db->prepare('INSERT INTO users(workspace_id,name,email,password_hash,role) VALUES(?,?,?,?,?)')->execute([$wid,$name,$email,password_hash($pass,PASSWORD_DEFAULT),'owner']);$uid=(int)$this->db->lastInsertId();
             $trialDays=(int)$this->saasSettings()['trial_days'];$this->db->prepare('INSERT INTO subscriptions(workspace_id,plan,status,trial_ends_at,billing_interval) VALUES(?,?,?,datetime("now",?||" days"),?)')->execute([$wid,'all','trial',$trialDays,'month']);$this->db->commit();
-            $s=$this->db->prepare('SELECT * FROM users WHERE id=?');$s->execute([$uid]);Auth::login($s->fetch());Response::redirect('/uvod');
+            $s=$this->db->prepare('SELECT * FROM users WHERE id=?');$s->execute([$uid]);Auth::login($s->fetch());Response::redirect('/?tour=1');
         }catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();View::render('auth/register',['title'=>'Začít zdarma','error'=>'Účet se nepodařilo vytvořit. E-mail může být již použit.']);}
     }
     public function logout():void{Auth::require();Auth::logout();Response::redirect('/login');}

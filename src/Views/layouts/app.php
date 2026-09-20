@@ -59,50 +59,57 @@ const fab=document.getElementById('niaFab'),panel=document.getElementById('niaPa
 .nia-tour-focus{position:fixed;z-index:112;pointer-events:none;border:3px solid #5946e8;border-radius:14px;box-shadow:0 0 0 5px rgba(89,70,232,.14),0 0 34px rgba(89,70,232,.22);transition:left .22s ease,top .22s ease,width .22s ease,height .22s ease}
 .nia-tour-card{position:fixed;z-index:1200;left:50%;bottom:128px;transform:translateX(-50%);width:min(420px,calc(100vw - 24px));background:#fff;color:#172746;border:1px solid #dce6f3;border-radius:22px;padding:16px;box-shadow:0 20px 55px rgba(7,26,58,.25);font-size:14px;line-height:1.5;box-sizing:border-box;-webkit-text-size-adjust:100%}
 .nia-tour-head{display:flex;align-items:center;gap:10px;min-height:28px}.nia-tour-step{font-size:13px;font-weight:900;letter-spacing:.08em;color:#5946e8}.nia-tour-close{margin-left:auto;border:0;background:#f2f5fa;color:#66758b;width:34px;height:34px;border-radius:10px;font-size:20px;line-height:1;cursor:pointer}.nia-tour-title{margin:10px 0 5px;font-size:20px;line-height:1.2;letter-spacing:-.02em;font-weight:850;color:#172746}.nia-tour-text{margin:0;color:#526783;font-size:14px;line-height:1.5}.nia-tour-actions{display:flex;gap:8px;margin-top:14px}.nia-tour-actions .btn{flex:1;min-height:42px}.nia-tour-progress{display:flex;gap:4px;margin-top:12px}.nia-tour-progress i{height:4px;flex:1;border-radius:99px;background:#e1e7ef}.nia-tour-progress i.active{background:linear-gradient(90deg,#1677ee,#5946e8)}
-.nia-tour-skip{position:fixed;z-index:1201;left:12px;bottom:24px;border:1px solid #dce6f3;background:#fff;color:#52647d;border-radius:11px;padding:9px 12px;font-size:12px;font-weight:800;box-shadow:0 8px 22px rgba(16,33,63,.14);cursor:pointer}
+.nia-tour-skip-form{position:fixed;z-index:1201;left:12px;bottom:24px}.nia-tour-skip-form button{border:1px solid #dce6f3;background:#fff;color:#52647d;border-radius:11px;padding:9px 12px;font-size:12px;font-weight:800;box-shadow:0 8px 22px rgba(16,33,63,.14);cursor:pointer}.nia-tour-skip{position:fixed;z-index:1201;left:12px;bottom:24px;border:1px solid #dce6f3;background:#fff;color:#52647d;border-radius:11px;padding:9px 12px;font-size:12px;font-weight:800;box-shadow:0 8px 22px rgba(16,33,63,.14);cursor:pointer}
 body.nia-tour-active .nia-fab{z-index:1202;transition:left .3s ease,top .3s ease,right .3s ease,bottom .3s ease}
 @media(max-width:760px){
   .nia-tour-card{left:12px;right:12px;bottom:118px;transform:none;width:auto;padding:15px;border-radius:20px;box-shadow:0 16px 45px rgba(7,26,58,.27)}
-  .nia-tour-title{font-size:18px}.nia-tour-text{font-size:14px}.nia-tour-actions{gap:7px}.nia-tour-actions .btn{font-size:13px;padding:9px 7px}.nia-tour-progress{margin-top:10px}.nia-tour-skip{left:12px;bottom:64px;padding:8px 10px}
+  .nia-tour-title{font-size:18px}.nia-tour-text{font-size:14px}.nia-tour-actions{gap:7px}.nia-tour-actions .btn{font-size:13px;padding:9px 7px}.nia-tour-progress{margin-top:10px}.nia-tour-skip-form{left:12px;bottom:64px}.nia-tour-skip{left:12px;bottom:64px;padding:8px 10px}
 }
 </style>
+<?php
+$tour=(int)($_GET['tour']??0);
+$tourDefs=[
+1=>['Přehled firmy','Tady začíná Byznio. Uvidíš příjmy, výdaje, faktury, zakázky, úkoly a důležitá upozornění','/'],
+2=>['Zákazníci a CRM','Tady vedeš zákazníky, kontakty, historii, nabídky, zakázky a faktury. Začni tlačítkem Nový zákazník.','/customers'],
+3=>['Doklady a faktury','Tady vytváříš nabídky, faktury a další doklady. Z jednoho místa můžeš pokračovat k PDF, QR platbě nebo odeslání.','/documents'],
+4=>['Zakázky','Zakázka propojuje zákazníka, rozpočet, práci, materiál a následnou fakturaci. V detailu vidíš skutečné náklady.','/jobs'],
+5=>['Banka a párování','Tady sleduješ bankovní transakce a páruješ přijaté platby s vystavenými doklady.','/bank'],
+6=>['Výdaje a doklady','Tady zapisuješ firemní náklady a jejich doklady. Výdaje můžeš později využít i v přehledu financí.','/expenses'],
+7=>['Sklad','Tady spravuješ produkty, zásoby, příjem, výdej a inventuru. Byznio upozorní na nízký stav.','/products'],
+8=>['Kalendář','Tady plánuješ termíny, schůzky a další události spojené s podnikáním.','/calendar'],
+9=>['Úkoly','Tady držíš úkoly, termíny a priority na jednom místě, aby nic důležitého nezůstalo zapomenuté.','/tasks'],
+10=>['Automatizace','Tady nastavíš opakované faktury, upomínky, reporty a další automatické činnosti.','/automation'],
+11=>['Daně a exporty','Tady najdeš daňová nastavení a podklady pro další zpracování. Výpočty jsou průběžným přehledem.','/tax'],
+12=>['Nia a AI','Tady můžeš zadat Nii úkol. U důležitých nebo finančních akcí nejdřív připraví návrh a čeká na tvoje potvrzení.','/ai'],
+13=>['Nastavení','Tady nastavíš firmu, předplatné, bankovní účty, e-maily, tým a další chování Byznia.','/settings'],
+14=>['Hotovo','Průvodce je hotový. Nia zůstává v aplikaci jako malý pomocník. Klikni na ni kdykoli a napiš, co chceš udělat.','/']
+];
+$tourNext=[1=>'/?tour=2',2=>'/customers?tour=3',3=>'/documents?tour=4',4=>'/jobs?tour=5',5=>'/bank?tour=6',6=>'/expenses?tour=7',7=>'/products?tour=8',8=>'/calendar?tour=9',9=>'/tasks?tour=10',10=>'/automation?tour=11',11=>'/tax?tour=12',12=>'/ai?tour=13',13=>'/?tour=14'];
+$tourPrev=[2=>'/?tour=1',3=>'/customers?tour=2',4=>'/documents?tour=3',5=>'/jobs?tour=4',6=>'/bank?tour=5',7=>'/expenses?tour=6',8=>'/products?tour=7',9=>'/calendar?tour=8',10=>'/automation?tour=9',11=>'/tax?tour=10',12=>'/ai?tour=11',13=>'/settings?tour=12',14=>'/settings?tour=13'];
+if($tour>=1 && $tour<=14 && isset($tourDefs[$tour])):
+  [$tourTitle,$tourText,$tourPath]=$tourDefs[$tour];
+?>
+<section class="nia-tour-card" id="niaTourCard" role="dialog" aria-label="Průvodce Byzniem">
+  <div class="nia-tour-head"><span class="nia-tour-step">Nia · <?=$tour?> / 14</span><button type="button" class="nia-tour-close" id="niaTourClose" aria-label="Zavřít průvodce">×</button></div>
+  <div class="nia-tour-title"><?=View::e($tourTitle)?></div>
+  <p class="nia-tour-text"><?=View::e($tourText)?></p>
+  <div class="nia-tour-actions">
+    <?php if(isset($tourPrev[$tour])): ?><a class="btn" href="<?=View::e($tourPrev[$tour])?>">← Zpět</a><?php endif; ?>
+    <?php if($tour===14): ?>
+      <form method="post" action="/uvod/complete"><input type="hidden" name="_csrf" value="<?=View::e(Auth::csrf())?>"><button class="btn primary" type="submit">Dokončit →</button></form>
+    <?php else: ?><a class="btn primary" href="<?=View::e($tourNext[$tour])?>">Další →</a><?php endif; ?>
+  </div>
+  <div class="nia-tour-progress" aria-hidden="true"><?php for($i=1;$i<=14;$i++): ?><i class="<?=$i===$tour?'active':''?>"></i><?php endfor; ?></div>
+</section>
+<form class="nia-tour-skip-form" method="post" action="/uvod/skip"><input type="hidden" name="_csrf" value="<?=View::e(Auth::csrf())?>"><button type="submit" class="nia-tour-skip">Přeskočit průvodce</button></form>
 <script>(function(){
-const params=new URLSearchParams(location.search);const tour=Number(params.get('tour')||0);if(!Number.isInteger(tour)||tour<1||tour>14)return;
-const defs={
-1:{title:'Přehled firmy',text:'Tady začíná Byznio. Uvidíš příjmy, výdaje, faktury, zakázky, úkoly a důležitá upozornění.',path:'/'},
-2:{title:'Zákazníci a CRM',text:'Tady vedeš zákazníky, kontakty, historii, nabídky, zakázky a faktury. Začni tlačítkem Nový zákazník.',path:'/customers'},
-3:{title:'Doklady a faktury',text:'Tady vytváříš nabídky, faktury a další doklady. Z jednoho místa můžeš pokračovat k PDF, QR platbě nebo odeslání.',path:'/documents'},
-4:{title:'Zakázky',text:'Zakázka propojuje zákazníka, rozpočet, práci, materiál a následnou fakturaci. V detailu vidíš skutečné náklady.',path:'/jobs'},
-5:{title:'Banka a párování',text:'Tady sleduješ bankovní transakce a páruješ přijaté platby s vystavenými doklady.',path:'/bank'},
-6:{title:'Výdaje a doklady',text:'Tady zapisuješ firemní náklady a jejich doklady. Výdaje můžeš později využít i v přehledu financí.',path:'/expenses'},
-7:{title:'Sklad',text:'Tady spravuješ produkty, zásoby, příjem, výdej a inventuru. Byznio upozorní na nízký stav.',path:'/products'},
-8:{title:'Kalendář',text:'Tady plánuješ termíny, schůzky a další události spojené s podnikáním.',path:'/calendar'},
-9:{title:'Úkoly',text:'Tady držíš úkoly, termíny a priority na jednom místě, aby nic důležitého nezůstalo zapomenuté.',path:'/tasks'},
-10:{title:'Automatizace',text:'Tady nastavíš opakované faktury, upomínky, reporty a další automatické činnosti.',path:'/automation'},
-11:{title:'Daně a exporty',text:'Tady najdeš daňová nastavení a podklady pro další zpracování. Výpočty jsou průběžným přehledem.',path:'/tax'},
-12:{title:'Nia a AI',text:'Tady můžeš zadat Nii úkol. U důležitých nebo finančních akcí nejdřív připraví návrh a čeká na tvoje potvrzení.',path:'/ai'},
-13:{title:'Nastavení',text:'Tady nastavíš firmu, předplatné, bankovní účty, e-maily, tým a další chování Byznia.',path:'/settings'},
-14:{title:'Hotovo',text:'Průvodce je hotový. Nia zůstává v aplikaci jako malý pomocník. Klikni na ni kdykoli a napiš, co chceš udělat.',path:'/'}
-};
-const next={1:'/?tour=2',2:'/customers?tour=3',3:'/documents?tour=4',4:'/jobs?tour=5',5:'/bank?tour=6',6:'/expenses?tour=7',7:'/products?tour=8',8:'/calendar?tour=9',9:'/tasks?tour=10',10:'/automation?tour=11',11:'/tax?tour=12',12:'/ai?tour=13',13:'/?tour=14'};
-const prev={2:'/?tour=1',3:'/customers?tour=2',4:'/documents?tour=3',5:'/jobs?tour=4',6:'/bank?tour=5',7:'/expenses?tour=6',8:'/products?tour=7',9:'/calendar?tour=8',10:'/automation?tour=9',11:'/tax?tour=10',12:'/ai?tour=11',13:'/settings?tour=12',14:'/settings?tour=13'};
-const d=defs[tour];if(!d)return;document.body.classList.add('nia-tour-active');
-const target=()=>innerWidth<761?(document.querySelector('.page-head')||document.querySelector('.content')):(d.path==='/'?(document.querySelector('.page-head')||document.querySelector('.content')):(document.querySelector('[data-guide="'+d.path.replace(/^\//,'')+'"]')||document.querySelector('.page-head')||document.querySelector('.content')));
+const tour=<?=json_encode($tour)?>, path=<?=json_encode($tourPath)?>;
 const shade=document.createElement('div');shade.className='nia-tour-shade';document.body.appendChild(shade);
 const focus=document.createElement('div');focus.className='nia-tour-focus';document.body.appendChild(focus);
-const card=document.createElement('section');card.className='nia-tour-card';card.setAttribute('role','dialog');card.setAttribute('aria-live','polite');
-const head=document.createElement('div');head.className='nia-tour-head';const stepLabel=document.createElement('span');stepLabel.className='nia-tour-step';stepLabel.textContent='Nia · '+tour+' / 14';head.appendChild(stepLabel);
-const close=document.createElement('button');close.type='button';close.className='nia-tour-close';close.setAttribute('aria-label','Zavřít průvodce na této stránce');close.textContent='×';head.appendChild(close);card.appendChild(head);
-const title=document.createElement('div');title.className='nia-tour-title';title.textContent=d.title;card.appendChild(title);
-const text=document.createElement('p');text.className='nia-tour-text';text.textContent=d.text;card.appendChild(text);
-const actions=document.createElement('div');actions.className='nia-tour-actions';
-if(prev[tour]){const back=document.createElement('a');back.className='btn';back.href=prev[tour];back.textContent='← Zpět';actions.appendChild(back)}
-if(tour===14){const done=document.createElement('form');done.method='post';done.action='/uvod/complete';const csrf=document.querySelector('input[name="_csrf"]')?.value||'';const hidden=document.createElement('input');hidden.type='hidden';hidden.name='_csrf';hidden.value=csrf;const button=document.createElement('button');button.type='submit';button.className='btn primary';button.textContent='Dokončit →';done.append(hidden,button);actions.appendChild(done)}else{const n=document.createElement('a');n.className='btn primary';n.href=next[tour];n.textContent='Další →';actions.appendChild(n)}
-card.appendChild(actions);
-const progress=document.createElement('div');progress.className='nia-tour-progress';for(let i=1;i<=14;i++){const bar=document.createElement('i');if(i===tour)bar.className='active';progress.appendChild(bar)}card.appendChild(progress);document.body.appendChild(card);
-const skip=document.createElement('form');skip.method='post';skip.action='/uvod/skip';const csrf=document.querySelector('input[name="_csrf"]')?.value||'';const hi=document.createElement('input');hi.type='hidden';hi.name='_csrf';hi.value=csrf;const sb=document.createElement('button');sb.type='submit';sb.className='nia-tour-skip';sb.textContent='Přeskočit průvodce';skip.append(hi,sb);document.body.appendChild(skip);
 const fab=document.getElementById('niaFab');
-function place(){const el=target();if(!el)return;const r=el.getBoundingClientRect();if(tour!==14&&(r.top<72||r.bottom>innerHeight-72))el.scrollIntoView({behavior:'smooth',block:'center'});const rr=el.getBoundingClientRect();focus.style.left=Math.max(6,rr.left-7)+'px';focus.style.top=Math.max(72,rr.top-7)+'px';focus.style.width=Math.min(rr.width+14,innerWidth-12)+'px';focus.style.height=Math.min(rr.height+14,innerHeight-90)+'px';if(fab){let x=Math.min(innerWidth-88,Math.max(12,rr.left+rr.width-70));let y=Math.max(86,Math.min(innerHeight-180,rr.top-74));if(innerWidth>760){x=Math.min(innerWidth-98,Math.max(20,rr.right-88));y=Math.min(innerHeight-105,Math.max(90,rr.bottom+14));}fab.style.left=x+'px';fab.style.top=y+'px';fab.style.right='auto';fab.style.bottom='auto';}}
-place();addEventListener('resize',place,{passive:true});addEventListener('scroll',place,{passive:true});
-close.addEventListener('click',()=>{shade.remove();focus.remove();card.remove();skip.remove();document.body.classList.remove('nia-tour-active');if(fab){fab.style.left='';fab.style.top='';fab.style.right='';fab.style.bottom='';}});
-})();</script></body></html>
+const target=()=>innerWidth<761?(document.querySelector('.page-head')||document.querySelector('.content')):(path==='/'?(document.querySelector('.page-head')||document.querySelector('.content')):(document.querySelector('[data-guide="'+path.replace(/^\//,'')+'"]')||document.querySelector('.page-head')||document.querySelector('.content')));
+function place(){const el=target();if(!el)return;const r=el.getBoundingClientRect();const rr=r;focus.style.left=Math.max(6,rr.left-7)+'px';focus.style.top=Math.max(72,rr.top-7)+'px';focus.style.width=Math.min(rr.width+14,innerWidth-12)+'px';focus.style.height=Math.min(rr.height+14,innerHeight-90)+'px';if(fab){let x=Math.min(innerWidth-88,Math.max(12,rr.left+rr.width-70));let y=Math.max(86,Math.min(innerHeight-180,rr.top-74));if(innerWidth>760){x=Math.min(innerWidth-98,Math.max(20,rr.right-88));y=Math.min(innerHeight-105,Math.max(90,rr.bottom+14));}fab.style.left=x+'px';fab.style.top=y+'px';fab.style.right='auto';fab.style.bottom='auto';}}
+if(tour!==14){setTimeout(place,60)}else{place()}addEventListener('resize',place,{passive:true});addEventListener('scroll',place,{passive:true});
+const close=document.getElementById('niaTourClose');if(close)close.addEventListener('click',()=>{shade.remove();focus.remove();document.getElementById('niaTourCard')?.remove();document.querySelector('.nia-tour-skip-form')?.remove();document.body.classList.remove('nia-tour-active');if(fab){fab.style.left='';fab.style.top='';fab.style.right='';fab.style.bottom='';}});
+})();</script>
+<?php endif; ?></body></html>

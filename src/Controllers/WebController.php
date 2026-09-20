@@ -9,7 +9,7 @@ final class WebController {
     private function isSuperAdmin():bool{ $emails=array_filter(array_map('trim',explode(',',(string)Env::get('SUPER_ADMIN_EMAILS','')))); return in_array(strtolower((string)(Auth::user()['email']??'')),array_map('strtolower',$emails),true); }
     public function landing():void{ if(Auth::check()) { Response::redirect('/'); } View::render('landing',['title'=>'Byznio','settings'=>$this->saasSettings()]); }
     public function dashboard():void{
-        Auth::require();if($this->needsOnboarding() && !isset($_GET['tour']))$_GET['tour']=1;$wid=Auth::workspaceId();$k=[];
+        Auth::require();$wid=Auth::workspaceId();$k=[];
         $queries=['customers'=>'SELECT COUNT(*) FROM customers WHERE workspace_id=? AND active=1','invoices'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice"','overdue'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND payment_status!="paid" AND due_date<date("now")','jobs'=>'SELECT COUNT(*) FROM jobs WHERE workspace_id=? AND status NOT IN ("done","cancelled")'];
         foreach($queries as $key=>$q){$st=$this->db->prepare($q);$st->execute([$wid]);$k[$key]=(int)$st->fetchColumn();}
         foreach(['revenue'=>'SELECT COALESCE(SUM(total_with_vat),0) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND issue_date>=date("now","start of month")','expenses'=>'SELECT COALESCE(SUM(amount),0) FROM expenses WHERE workspace_id=? AND expense_date>=date("now","start of month")','paid'=>'SELECT COALESCE(SUM(amount),0) FROM payments WHERE workspace_id=? AND paid_at>=date("now","start of month")'] as $key=>$q){$st=$this->db->prepare($q);$st->execute([$wid]);$k[$key]=(float)$st->fetchColumn();}
@@ -33,7 +33,7 @@ final class WebController {
         try{$this->db->beginTransaction();$local=$this->makeEmailLocalpart($company);$this->db->prepare('INSERT INTO workspaces(name,plan,status,email_localpart) VALUES(?,?,?,?)')->execute([$company,'all','trial',$local]);
             $wid=(int)$this->db->lastInsertId();$this->db->prepare('INSERT INTO users(workspace_id,name,email,password_hash,role) VALUES(?,?,?,?,?)')->execute([$wid,$name,$email,password_hash($pass,PASSWORD_DEFAULT),'owner']);$uid=(int)$this->db->lastInsertId();
             $trialDays=(int)$this->saasSettings()['trial_days'];$this->db->prepare('INSERT INTO subscriptions(workspace_id,plan,status,trial_ends_at,billing_interval) VALUES(?,?,?,datetime("now",?||" days"),?)')->execute([$wid,'all','trial',$trialDays,'month']);$this->db->commit();
-            $s=$this->db->prepare('SELECT * FROM users WHERE id=?');$s->execute([$uid]);Auth::login($s->fetch());Response::redirect('/');
+            $s=$this->db->prepare('SELECT * FROM users WHERE id=?');$s->execute([$uid]);Auth::login($s->fetch());$_SESSION['byznio_new_registration']=1;Response::redirect('/uvod');
         }catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();View::render('auth/register',['title'=>'Začít zdarma','error'=>'Účet se nepodařilo vytvořit. E-mail může být již použit.']);}
     }
     public function logout():void{Auth::require();Auth::logout();Response::redirect('/login');}
@@ -43,9 +43,10 @@ final class WebController {
     }
     public function onboarding():void{
         Auth::require();
-        // /uvod is the explicit entry point to the visual Nia tour.
-        // It must work even for an existing workspace that already completed onboarding.
-        Response::redirect('/?tour=1');
+        if(empty($_SESSION['byznio_new_registration']) || !$this->needsOnboarding()){ Response::redirect('/'); }
+        $step=max(1,min(7,(int)($_GET['step']??1)));
+        $company=$this->company();
+        View::render('onboarding/index',['title'=>'Vítejte v Byzniu','step'=>$step,'company'=>$company]);
     }
     public function onboardingCompany():void{
         Auth::require();Auth::verifyCsrf();
@@ -54,8 +55,8 @@ final class WebController {
         $this->db->prepare('UPDATE workspaces SET ico=?,dic=?,street=?,city=?,zip=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$d['ico']?:null,$d['dic']?:null,$d['street']?:null,$d['city']?:null,$d['zip']?:null,Auth::workspaceId()]);
         Response::redirect('/uvod?step=2');
     }
-    public function onboardingComplete():void{Auth::require();Auth::verifyCsrf();$this->db->prepare('UPDATE workspaces SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([Auth::workspaceId()]);Response::redirect('/');}
-    public function onboardingSkip():void{Auth::require();Auth::verifyCsrf();$this->db->prepare('UPDATE workspaces SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([Auth::workspaceId()]);Response::redirect('/');}
+    public function onboardingComplete():void{Auth::require();Auth::verifyCsrf();$this->db->prepare('UPDATE workspaces SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([Auth::workspaceId()]);unset($_SESSION['byznio_new_registration']);Response::redirect('/');}
+    public function onboardingSkip():void{Auth::require();Auth::verifyCsrf();$this->db->prepare('UPDATE workspaces SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([Auth::workspaceId()]);unset($_SESSION['byznio_new_registration']);Response::redirect('/');}
     public function customers():void{Auth::require();$q=trim($_GET['q']??'');$sql='SELECT * FROM customers WHERE workspace_id=? AND active=1';$p=[Auth::workspaceId()];if($q){$sql.=' AND (company_name LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR ico LIKE ?)';$l="%$q%";array_push($p,$l,$l,$l,$l);}$sql.=' ORDER BY company_name,last_name';$s=$this->db->prepare($sql);$s->execute($p);View::render('customers/index',['title'=>'Zákazníci','customers'=>$s->fetchAll(),'q'=>$q]);}
     public function customerForm():void{Auth::require();View::render('customers/form',['title'=>'Nový zákazník','customer'=>[]]);}
     public function customerSave():void{Auth::require();Auth::verifyCsrf();$d=$_POST;if(!empty($d['ico']) && !empty($_POST['ares'])){$a=AresService::lookup($d['ico']);if($a)$d=array_merge($d,$a);} $s=$this->db->prepare('INSERT INTO customers(workspace_id,type,company_name,first_name,last_name,ico,dic,street,city,zip,delivery_street,delivery_city,delivery_zip,email,phone,web,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');$s->execute([Auth::workspaceId(),$d['type']??'company',$d['company_name']??null,$d['first_name']??null,$d['last_name']??null,$d['ico']??null,$d['dic']??null,$d['street']??null,$d['city']??null,$d['zip']??null,$d['delivery_street']??null,$d['delivery_city']??null,$d['delivery_zip']??null,$d['email']??null,$d['phone']??null,$d['web']??null,$d['note']??null]);$id=(int)$this->db->lastInsertId();$this->audit('create','customer',$id,$d);Response::redirect('/customers');}

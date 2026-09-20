@@ -12,7 +12,7 @@ final class SaltEdgeService {
         curl_setopt_array($ch,$o);$raw=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);$err=curl_error($ch);curl_close($ch);
         $j=json_decode((string)$raw,true);if($raw===false||$code>=400)throw new \RuntimeException('Salt Edge HTTP '.$code.': '.(($j['error']['message']??null) ?: ($err ?: $raw)));return is_array($j)?$j:[];
     }
-    public static function connectSession(int $customerId,string $returnTo,string $country='cz'):array{
+    public static function connectSession(string $customerId,string $returnTo,string $country='cz'):array{
         return self::req('POST','/connections/connect',['customer_id'=>(string)$customerId,'country_code'=>strtoupper($country),'consent'=>['scopes'=>['accounts','transactions'],'from_date'=>date('Y-m-d',strtotime('-365 days'))],'attempt'=>['return_to'=>$returnTo]]);
     }
     public static function customer(string $identifier):array{return self::req('POST','/customers',['identifier'=>$identifier]);}

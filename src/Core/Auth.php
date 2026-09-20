@@ -21,7 +21,7 @@ final class Auth {
         if(!self::check()){Response::redirect('/login');}
         $uri=parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH)?:'/';
         $map=[
-            '/customers'=>'crm','/documents'=>'invoicing','/jobs'=>'jobs','/expenses'=>'expenses','/products'=>'inventory',
+            '/customers'=>'crm','/documents'=>'invoicing','/documents/files'=>'documents','/jobs'=>'jobs','/expenses'=>'expenses','/products'=>'inventory',
             '/bank'=>'bank','/calendar'=>'calendar','/tasks'=>'tasks','/ai'=>'ai','/recurring'=>'invoicing','/tax'=>'tax',
             '/automation'=>'automation','/settings/api-keys'=>'api','/admin/users'=>'team','/admin'=>'admin','/reminders'=>'invoicing'
         ];
@@ -34,9 +34,12 @@ final class Auth {
         if($raw!==''){
             $p=json_decode($raw,true); if(is_array($p)&&array_key_exists($permission,$p))return (bool)$p[$permission];
         }
+        if(!in_array(self::$user['role'],['employee','accountant','owner','admin'],true)){
+            $s=Database::pdo()->prepare('SELECT permissions_json FROM custom_roles WHERE workspace_id=? AND name=? LIMIT 1');$s->execute([(int)self::$user['workspace_id'],(string)self::$user['role']]);$custom=$s->fetchColumn();if($custom!==false){$p=json_decode((string)$custom,true);if(is_array($p)&&array_key_exists($permission,$p))return (bool)$p[$permission];}
+        }
         $defaults=[
             'crm'=>true,'invoicing'=>true,'jobs'=>true,'expenses'=>true,'inventory'=>true,'bank'=>false,
-            'calendar'=>true,'tasks'=>true,'ai'=>false,'tax'=>false,'automation'=>false,'api'=>false,'team'=>false,'admin'=>false
+            'calendar'=>true,'tasks'=>true,'ai'=>false,'tax'=>false,'automation'=>false,'api'=>false,'documents'=>true,'team'=>false,'admin'=>false
         ];
         if(self::$user['role']==='accountant')$defaults=array_merge($defaults,['bank'=>true,'tax'=>true,'api'=>true]);
         return (bool)($defaults[$permission]??false);

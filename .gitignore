@@ -1,7 +1,0 @@
-.env
-/vendor/
-/database/*.sqlite
-/storage/uploads/*
-/storage/logs/*
-!.gitkeep
-storage/backups/*

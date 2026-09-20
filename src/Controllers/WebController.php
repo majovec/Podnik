@@ -9,7 +9,7 @@ final class WebController {
     private function isSuperAdmin():bool{ $emails=array_filter(array_map('trim',explode(',',(string)Env::get('SUPER_ADMIN_EMAILS','')))); return in_array(strtolower((string)(Auth::user()['email']??'')),array_map('strtolower',$emails),true); }
     public function landing():void{ if(Auth::check()) { Response::redirect('/'); } View::render('landing',['title'=>'Byznio','settings'=>$this->saasSettings()]); }
     public function dashboard():void{
-        Auth::require();if($this->needsOnboarding() && !isset($_GET['tour']))Response::redirect('/uvod');$wid=Auth::workspaceId();$k=[];
+        Auth::require();if($this->needsOnboarding() && !isset($_GET['tour']))$_GET['tour']=1;$wid=Auth::workspaceId();$k=[];
         $queries=['customers'=>'SELECT COUNT(*) FROM customers WHERE workspace_id=? AND active=1','invoices'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice"','overdue'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND payment_status!="paid" AND due_date<date("now")','jobs'=>'SELECT COUNT(*) FROM jobs WHERE workspace_id=? AND status NOT IN ("done","cancelled")'];
         foreach($queries as $key=>$q){$st=$this->db->prepare($q);$st->execute([$wid]);$k[$key]=(int)$st->fetchColumn();}
         foreach(['revenue'=>'SELECT COALESCE(SUM(total_with_vat),0) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND issue_date>=date("now","start of month")','expenses'=>'SELECT COALESCE(SUM(amount),0) FROM expenses WHERE workspace_id=? AND expense_date>=date("now","start of month")','paid'=>'SELECT COALESCE(SUM(amount),0) FROM payments WHERE workspace_id=? AND paid_at>=date("now","start of month")'] as $key=>$q){$st=$this->db->prepare($q);$st->execute([$wid]);$k[$key]=(float)$st->fetchColumn();}
@@ -20,7 +20,7 @@ final class WebController {
         View::render('dashboard/index',['title'=>'Přehled','k'=>$k,'alerts'=>$alerts,'events'=>$events,'tasks'=>$tasks,'low'=>$low,'recommendations'=>$recommendations]);
     }
     public function login():void{if(Auth::check())Response::redirect('/');View::render('auth/login',['title'=>'Přihlášení']);}
-    public function loginPost():void{Auth::verifyCsrf();$email=strtolower(trim($_POST['email']??''));$ip=$_SERVER['REMOTE_ADDR']??'0.0.0.0';$ih=hash_hmac('sha256',$ip,Env::get('APP_KEY','fallback'));$eh=hash_hmac('sha256',$email,Env::get('APP_KEY','fallback'));$s=$this->db->prepare('SELECT COUNT(*) FROM login_attempts WHERE (ip_hash=? OR email_hash=?) AND attempted_at>?');$s->execute([$ih,$eh,time()-900]);if((int)$s->fetchColumn()>=8){View::render('auth/login',['title'=>'Přihlášení','error'=>'Příliš mnoho neúspěšných pokusů. Zkuste to později.']);return;}$s=$this->db->prepare('SELECT * FROM users WHERE email=? AND active=1');$s->execute([$email]);$u=$s->fetch();if(!$u||!password_verify($_POST['password']??'',$u['password_hash'])){$this->db->prepare('INSERT INTO login_attempts(ip_hash,email_hash,attempted_at) VALUES(?,?,?)')->execute([$ih,$eh,time()]);View::render('auth/login',['title'=>'Přihlášení','error'=>'Neplatný e-mail nebo heslo.']);return;}$this->db->prepare('DELETE FROM login_attempts WHERE ip_hash=? OR email_hash=?')->execute([$ih,$eh]);Auth::login($u);Response::redirect($this->needsOnboarding() ? '/uvod' : '/');}
+    public function loginPost():void{Auth::verifyCsrf();$email=strtolower(trim($_POST['email']??''));$ip=$_SERVER['REMOTE_ADDR']??'0.0.0.0';$ih=hash_hmac('sha256',$ip,Env::get('APP_KEY','fallback'));$eh=hash_hmac('sha256',$email,Env::get('APP_KEY','fallback'));$s=$this->db->prepare('SELECT COUNT(*) FROM login_attempts WHERE (ip_hash=? OR email_hash=?) AND attempted_at>?');$s->execute([$ih,$eh,time()-900]);if((int)$s->fetchColumn()>=8){View::render('auth/login',['title'=>'Přihlášení','error'=>'Příliš mnoho neúspěšných pokusů. Zkuste to později.']);return;}$s=$this->db->prepare('SELECT * FROM users WHERE email=? AND active=1');$s->execute([$email]);$u=$s->fetch();if(!$u||!password_verify($_POST['password']??'',$u['password_hash'])){$this->db->prepare('INSERT INTO login_attempts(ip_hash,email_hash,attempted_at) VALUES(?,?,?)')->execute([$ih,$eh,time()]);View::render('auth/login',['title'=>'Přihlášení','error'=>'Neplatný e-mail nebo heslo.']);return;}$this->db->prepare('DELETE FROM login_attempts WHERE ip_hash=? OR email_hash=?')->execute([$ih,$eh]);Auth::login($u);Response::redirect('/');}
     public function register():void{if(Auth::check())Response::redirect('/');View::render('auth/register',['title'=>'Začít zdarma']);}
     public function registerPost():void{
         Auth::verifyCsrf();$name=trim($_POST['name']??'');$email=strtolower(trim($_POST['email']??''));$pass=$_POST['password']??'';$company=trim($_POST['company']??$name);
@@ -28,7 +28,7 @@ final class WebController {
         try{$this->db->beginTransaction();$local=$this->makeEmailLocalpart($company);$this->db->prepare('INSERT INTO workspaces(name,plan,status,email_localpart) VALUES(?,?,?,?)')->execute([$company,'all','trial',$local]);
             $wid=(int)$this->db->lastInsertId();$this->db->prepare('INSERT INTO users(workspace_id,name,email,password_hash,role) VALUES(?,?,?,?,?)')->execute([$wid,$name,$email,password_hash($pass,PASSWORD_DEFAULT),'owner']);$uid=(int)$this->db->lastInsertId();
             $trialDays=(int)$this->saasSettings()['trial_days'];$this->db->prepare('INSERT INTO subscriptions(workspace_id,plan,status,trial_ends_at,billing_interval) VALUES(?,?,?,datetime("now",?||" days"),?)')->execute([$wid,'all','trial',$trialDays,'month']);$this->db->commit();
-            $s=$this->db->prepare('SELECT * FROM users WHERE id=?');$s->execute([$uid]);Auth::login($s->fetch());Response::redirect('/?tour=1');
+            $s=$this->db->prepare('SELECT * FROM users WHERE id=?');$s->execute([$uid]);Auth::login($s->fetch());Response::redirect('/');
         }catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();View::render('auth/register',['title'=>'Začít zdarma','error'=>'Účet se nepodařilo vytvořit. E-mail může být již použit.']);}
     }
     public function logout():void{Auth::require();Auth::logout();Response::redirect('/login');}
@@ -38,8 +38,7 @@ final class WebController {
     }
     public function onboarding():void{
         Auth::require();
-        if(!$this->needsOnboarding())Response::redirect('/');
-        Response::redirect('/?tour=1');
+        Response::redirect('/');
     }
     public function onboardingCompany():void{
         Auth::require();Auth::verifyCsrf();

@@ -69,7 +69,7 @@ body.nia-tour-active .nia-fab{z-index:1202;transition:left .3s ease,top .3s ease
 <?php
 $tour=(int)($_GET['tour']??0);
 $tourDefs=[
-1=>['Přehled firmy','Tady začíná Byznio. Uvidíš příjmy, výdaje, faktury, zakázky, úkoly a důležitá upozornění','/'],
+1=>['Vítej v Byzniu, přehled firmy','Ahoj, jsem Nia. Ve 14 krocích ti ukážu, co Byznio umí – tady na přehledu vidíš příjmy, výdaje, faktury, zakázky, úkoly a důležitá upozornění. Průvodce můžeš kdykoli přeskočit vlevo dole a spustit znovu kliknutím na mě.','/'],
 2=>['Zákazníci a CRM','Tady vedeš zákazníky, kontakty, historii, nabídky, zakázky a faktury. Začni tlačítkem Nový zákazník.','/customers'],
 3=>['Doklady a faktury','Tady vytváříš nabídky, faktury a další doklady. Z jednoho místa můžeš pokračovat k PDF, QR platbě nebo odeslání.','/documents'],
 4=>['Zakázky','Zakázka propojuje zákazníka, rozpočet, práci, materiál a následnou fakturaci. V detailu vidíš skutečné náklady.','/jobs'],
@@ -82,7 +82,7 @@ $tourDefs=[
 11=>['Daně a exporty','Tady najdeš daňová nastavení a podklady pro další zpracování. Výpočty jsou průběžným přehledem.','/tax'],
 12=>['Nia a AI','Tady můžeš zadat Nii úkol. U důležitých nebo finančních akcí nejdřív připraví návrh a čeká na tvoje potvrzení.','/ai'],
 13=>['Nastavení','Tady nastavíš firmu, předplatné, bankovní účty, e-maily, tým a další chování Byznia.','/settings'],
-14=>['Hotovo','Průvodce je hotový. Nia zůstává v aplikaci jako malý pomocník. Klikni na ni kdykoli a napiš, co chceš udělat.','/']
+14=>['Hotovo','Průvodce je hotový. Nia zůstává v aplikaci jako pomocník – klikni na ni a napiš, co potřebuješ (např. najít fakturu nebo vytvořit doklad). Běžné dotazy zodpoví hned, ale u financí (platby, faktury, mazání záznamů) ti vždy nejdřív ukáže návrh a počká na tvoje potvrzení – sama nic neodešle ani nezaplatí bez tvého souhlasu.','/']
 ];
 $tourNext=[1=>'/?tour=2',2=>'/customers?tour=3',3=>'/documents?tour=4',4=>'/jobs?tour=5',5=>'/bank?tour=6',6=>'/expenses?tour=7',7=>'/products?tour=8',8=>'/calendar?tour=9',9=>'/tasks?tour=10',10=>'/automation?tour=11',11=>'/tax?tour=12',12=>'/ai?tour=13',13=>'/?tour=14'];
 $tourPrev=[2=>'/?tour=1',3=>'/customers?tour=2',4=>'/documents?tour=3',5=>'/jobs?tour=4',6=>'/bank?tour=5',7=>'/expenses?tour=6',8=>'/products?tour=7',9=>'/calendar?tour=8',10=>'/automation?tour=9',11=>'/tax?tour=10',12=>'/ai?tour=11',13=>'/settings?tour=12',14=>'/settings?tour=13'];

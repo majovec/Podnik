@@ -1,23 +1,18 @@
-# Byznio – Dashboard + Nia v2
+# Byznio v21 – oprava onboardingu, Nia a fakturace
 
-Tato verze opravuje první spuštění po registraci a přepracovává dashboard podle dodané vizualizace.
+## Opraveno
+- Opraven PSR-4 autoload AI providerů: `AiProviderFactory` a oba providery mají vlastní soubory. Chyba `class App\\Services\\AiProviderFactory not found` je odstraněna.
+- Registrace -> `/uvod` zůstává jediný automatický vstup do onboardingu pro nového uživatele.
+- Opraven krok 2 onboardingu, který po uložení firmy omylem vracel zpět na krok 2; nyní pokračuje na krok 3.
+- Onboarding má všech 7 kroků, každý obsahuje vlastní vizuální kontext / preview a vždy viditelnou navigaci Zpět / Pokračovat / Dokončit.
+- Mobilní hamburger menu nyní skutečně otevírá postranní menu i během onboardingu.
+- Nia není položka hlavního menu; zůstává jako plovoucí robot.
+- Nia lze myší/prstem přetáhnout na jiné místo obrazovky. Poloha se uloží do `localStorage`.
+- Nia se po obrazovce sama přesouvá, ale během otevřeného panelu a ručního přesouvání neruší uživatele.
+- Nia zobrazuje proaktivní hlášky podle aktuálních dat firmy a po interakci může používat hlas prohlížeče.
+- Dashboard dostal viditelnou sekci „Nia doporučuje“ a rychlé akce navíc k KPI, grafu, úkolům, pohledávkám, financím, kalendáři, skladu a modulům.
+- Fakturu/doklad lze vytvořit s novým zákazníkem přímo ve formuláři. Není nutné nejdřív opouštět fakturu a jít do CRM.
 
-## Co je v této verzi
-
-- nový samostatný onboarding `/uvod`, který se spouští pouze bezprostředně po nové registraci;
-- onboarding má 7 jasných kroků a ve druhém kroku umí doplnit firmu přes IČO/ARES;
-- po dokončení nebo přeskočení se onboarding označí jako dokončený a při běžném přihlášení se znovu automaticky nespouští;
-- dashboard je rozšířený na KPI, příjmy/výdaje, poslední aktivitu, dnešní úkoly, pohledávky po splatnosti, finance/cashflow, kalendář, sklad a rychlý přístup ke všem hlavním modulům;
-- odstraněno samostatné tlačítko Nia/AI z dashboardu a navigace;
-- Nia je trvale přítomná jako plovoucí robot, který se náhodně pohybuje po obrazovce;
-- Nia automaticky zobrazuje kontextové hlášky podle dat firmy (úkoly, splatnosti, zakázky, příjmy);
-- Nia umí přijmout úkol po kliknutí a poslat ho do existujícího AI endpointu;
-- přidán volitelný hlas přes browser SpeechSynthesis; prohlížeč může první automatické přehrání zvuku zablokovat do první interakce uživatele;
-- důležité/finanční AI akce nadále používají návrh → potvrzení → provedení;
-- zachována tenant izolace, CSRF, existující PHP architektura a ostatní moduly.
-
-## Ověření
-
-- PHP syntaxe: 62 PHP souborů bez syntax errors.
-- Nový onboarding je oddělený od dashboardu a není závislý na query `?tour=`.
-- Dashboard již neobsahuje tlačítko „Nia · AI asistent“.
+## Kontrola
+- Všech 63 PHP souborů v release prošlo `php -l` bez syntaktické chyby.
+- Plný end-to-end běh s reálným `.env`/API klíčem vyžaduje prostředí VPS, protože release ZIP neobsahuje `vendor/` ani produkční tajné údaje.

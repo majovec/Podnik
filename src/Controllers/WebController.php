@@ -53,7 +53,7 @@ final class WebController {
         $ico=preg_replace('/\D/','',(string)($_POST['ico']??''));$d=['ico'=>$ico,'dic'=>trim((string)($_POST['dic']??'')),'street'=>trim((string)($_POST['street']??'')),'city'=>trim((string)($_POST['city']??'')),'zip'=>trim((string)($_POST['zip']??''))];
         if($ico!=='' && !empty($_POST['ares'])){try{$a=AresService::lookup($ico);if($a)$d=array_merge($d,$a);}catch(\Throwable $e){}}
         $this->db->prepare('UPDATE workspaces SET ico=?,dic=?,street=?,city=?,zip=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$d['ico']?:null,$d['dic']?:null,$d['street']?:null,$d['city']?:null,$d['zip']?:null,Auth::workspaceId()]);
-        Response::redirect('/uvod?step=2');
+        Response::redirect('/uvod?step=3');
     }
     public function onboardingComplete():void{Auth::require();Auth::verifyCsrf();$this->db->prepare('UPDATE workspaces SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([Auth::workspaceId()]);unset($_SESSION['byznio_new_registration']);Response::redirect('/');}
     public function onboardingSkip():void{Auth::require();Auth::verifyCsrf();$this->db->prepare('UPDATE workspaces SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([Auth::workspaceId()]);unset($_SESSION['byznio_new_registration']);Response::redirect('/');}
@@ -68,13 +68,48 @@ final class WebController {
     public function offerStatus(int $id):void{Auth::require();Auth::verifyCsrf();$status=$_POST['status']??'pending';if(!in_array($status,['pending','accepted','rejected'],true))Response::abort(422,'Neplatný stav nabídky.');$this->db->prepare("UPDATE documents SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=? AND doc_type='offer'")->execute([$status,$id,Auth::workspaceId()]);$this->audit('offer_'.$status,'document',$id);Response::redirect('/documents');}
     public function inventoryCount():void{Auth::require();$this->gate();Auth::verifyCsrf();$pid=(int)$_POST['product_id'];$count=(float)$_POST['counted_stock'];$s=$this->db->prepare('SELECT * FROM products WHERE id=? AND workspace_id=?');$s->execute([$pid,Auth::workspaceId()]);$p=$s->fetch();if(!$p)Response::abort(404,'Produkt nenalezen.');$diff=$count-(float)$p['stock'];$this->db->beginTransaction();$this->db->prepare('UPDATE products SET stock=? WHERE id=? AND workspace_id=?')->execute([$count,$pid,Auth::workspaceId()]);$this->db->prepare('INSERT INTO inventory_counts(workspace_id,product_id,expected_stock,counted_stock,difference,note,created_by) VALUES(?,?,?,?,?,?,?)')->execute([Auth::workspaceId(),$pid,$p['stock'],$count,$diff,$_POST['note']??null,Auth::id()]);$this->db->commit();Response::redirect('/products');}
     public function documentSave():void{
-        Auth::require();Auth::verifyCsrf();$wid=Auth::workspaceId();$type=$_POST['doc_type']??'invoice';if(!in_array($type,['invoice','offer','order','proforma','credit'],true))Response::abort(422,'Neplatný typ dokladu.');$cid=(int)$_POST['customer_id'];$cq=$this->db->prepare('SELECT id FROM customers WHERE id=? AND workspace_id=? AND active=1');$cq->execute([$cid,$wid]);if(!$cq->fetchColumn())Response::abort(404,'Zákazník nenalezen.');$names=$_POST['item_name']??[];$qty=$_POST['item_qty']??[];$prices=$_POST['item_price']??[];$vat=$_POST['item_vat']??[];$sub=0;$vatSum=0;$items=[];
-        foreach($names as $i=>$name){if(trim($name)==='')continue;$q=(float)($qty[$i]??1);$price=(float)($prices[$i]??0);$vr=(float)($vat[$i]??21);$line=round($q*$price,2);$sub+= $line;$vatSum+=round($line*$vr/100,2);$items[]=[$name,$q,$_POST['item_unit'][$i]??'ks',$price,$vr,$line];}
-        $total=round($sub+$vatSum,2);$num=DocumentService::nextNumber($this->db,Auth::workspaceId(),$type);
-        $this->db->beginTransaction();$publicToken=DocumentService::publicToken($this->db);$s=$this->db->prepare('INSERT INTO documents(workspace_id,doc_type,doc_number,variable_symbol,customer_id,status,payment_status,issue_date,due_date,total_without_vat,total_vat,total_with_vat,created_by,public_token) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)');$s->execute([$wid,$type,$num,preg_replace('/\D/','',$num),$cid,($type==='offer'?'pending':'issued'),'unpaid',$_POST['issue_date']??date('Y-m-d'),$_POST['due_date']??date('Y-m-d',strtotime('+14 days')),$sub,$vatSum,$total,Auth::id(),$publicToken]);$id=(int)$this->db->lastInsertId();$iStmt=$this->db->prepare('INSERT INTO document_items(document_id,name,quantity,unit,unit_price,vat_rate,line_total) VALUES(?,?,?,?,?,?,?)');foreach($items as $it)$iStmt->execute([$id,...$it]);$this->db->commit();
+        Auth::require(); Auth::verifyCsrf(); $wid=Auth::workspaceId();
+        $type=$_POST['doc_type']??'invoice';
+        if(!in_array($type,['invoice','offer','order','proforma','credit'],true)) Response::abort(422,'Neplatný typ dokladu.');
+
+        $cid=(int)($_POST['customer_id']??0);
+        $this->db->beginTransaction();
+        try {
+            if($cid<=0 && !empty($_POST['new_customer'])) {
+                $company=trim((string)($_POST['new_customer_company']??''));
+                $first=trim((string)($_POST['new_customer_first_name']??''));
+                $last=trim((string)($_POST['new_customer_last_name']??''));
+                if($company==='' && $first==='' && $last==='') Response::abort(422,'Vyplňte alespoň název nového zákazníka.');
+                $this->db->prepare('INSERT INTO customers(workspace_id,type,company_name,first_name,last_name,ico,dic,email,phone,active) VALUES(?,?,?,?,?,?,?,?,?,1)')->execute([
+                    $wid, $company!==''?'company':'person', $company?:null, $first?:null, $last?:null,
+                    trim((string)($_POST['new_customer_ico']??''))?:null, trim((string)($_POST['new_customer_dic']??''))?:null,
+                    trim((string)($_POST['new_customer_email']??''))?:null, trim((string)($_POST['new_customer_phone']??''))?:null
+                ]);
+                $cid=(int)$this->db->lastInsertId();
+            }
+            $cq=$this->db->prepare('SELECT id FROM customers WHERE id=? AND workspace_id=? AND active=1');$cq->execute([$cid,$wid]);
+            if(!$cq->fetchColumn()) Response::abort(404,'Zákazník nenalezen. Vyberte zákazníka nebo vytvořte nového přímo zde.');
+
+            $names=$_POST['item_name']??[]; $qty=$_POST['item_qty']??[]; $prices=$_POST['item_price']??[]; $vat=$_POST['item_vat']??[];
+            $sub=0; $vatSum=0; $items=[];
+            foreach($names as $i=>$name){
+                if(trim($name)==='') continue; $q=(float)($qty[$i]??1); $price=(float)($prices[$i]??0); $vr=(float)($vat[$i]??21);
+                $line=round($q*$price,2); $sub+=$line; $vatSum+=round($line*$vr/100,2);
+                $items[]=[$name,$q,$_POST['item_unit'][$i]??'ks',$price,$vr,$line];
+            }
+            $total=round($sub+$vatSum,2); $num=DocumentService::nextNumber($this->db,$wid,$type); $publicToken=DocumentService::publicToken($this->db);
+            $s=$this->db->prepare('INSERT INTO documents(workspace_id,doc_type,doc_number,variable_symbol,customer_id,status,payment_status,issue_date,due_date,total_without_vat,total_vat,total_with_vat,created_by,public_token) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            $s->execute([$wid,$type,$num,preg_replace('/\D/','',$num),$cid,($type==='offer'?'pending':'issued'),'unpaid',$_POST['issue_date']??date('Y-m-d'),$_POST['due_date']??date('Y-m-d',strtotime('+14 days')),$sub,$vatSum,$total,Auth::id(),$publicToken]);
+            $id=(int)$this->db->lastInsertId();
+            $iStmt=$this->db->prepare('INSERT INTO document_items(document_id,name,quantity,unit,unit_price,vat_rate,line_total) VALUES(?,?,?,?,?,?,?)');
+            foreach($items as $it) $iStmt->execute([$id,...$it]);
+            $this->db->commit();
+        } catch(\Throwable $e) { if($this->db->inTransaction()) $this->db->rollBack(); throw $e; }
+
         if($type==='invoice'){ $q=$this->db->prepare('SELECT * FROM customers WHERE id=? AND workspace_id=?');$q->execute([$cid,$wid]);$cust=$q->fetch();$from=$this->workspaceMail($wid,'invoice');if($cust&&$cust['email']&&$from){$dir=dirname(__DIR__,2).'/storage/mail';if(!is_dir($dir))@mkdir($dir,0775,true);try{$doc=['doc_type'=>'invoice','doc_number'=>$num,'variable_symbol'=>preg_replace('/\D/','',$num),'total_without_vat'=>$sub,'total_vat'=>$vatSum,'total_with_vat'=>$total,'issue_date'=>$_POST['issue_date']??date('Y-m-d'),'due_date'=>$_POST['due_date']??date('Y-m-d',strtotime('+14 days'))];$pdf=PdfService::invoice($doc,array_map(fn($it)=>['name'=>$it[0],'quantity'=>$it[1],'unit'=>$it[2],'unit_price'=>$it[3],'vat_rate'=>$it[4],'line_total'=>$it[5]],$items),$this->company(),$cust);$file=$dir.'/'.$wid.'_'.$id.'.pdf';file_put_contents($file,$pdf);$this->queueEmail($wid,$cust['email'],'Faktura '.$num,'Dobrý den, v příloze zasíláme fakturu č. '.$num.'.',$file,rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken);}catch(\Throwable $e){$this->queueEmail($wid,$cust['email'],'Faktura '.$num,'Dobrý den, zasíláme fakturu č. '.$num.'.',null,rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken);}}}
         if($type==='offer'){ $q=$this->db->prepare('SELECT * FROM customers WHERE id=? AND workspace_id=?');$q->execute([$cid,$wid]);$cust=$q->fetch();$from=$this->workspaceMail($wid,'offer');if($cust&&$cust['email']&&$from){$this->queueEmail($wid,$cust['email'],'Nabídka '.$num,'Dobrý den, zasíláme vám nabídku č. '.$num.'. Nabídku můžete otevřít a odpovědět na ni přes veřejný odkaz.',null,rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken);}}
-        Response::redirect('/documents');}
+        Response::redirect('/documents');
+    }
     private function nextNumber(string $type):int{$s=$this->db->prepare('SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type=?');$s->execute([Auth::workspaceId(),$type]);return (int)$s->fetchColumn()+1;}
     public function markPaid(int $id):void{Auth::require();Auth::verifyCsrf();$s=$this->db->prepare('SELECT * FROM documents WHERE id=? AND workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen');$amount=(float)($_POST['amount']??$d['total_with_vat']);$this->db->prepare('INSERT INTO payments(workspace_id,document_id,amount,paid_at,method,source) VALUES(?,?,?,?,?,?)')->execute([Auth::workspaceId(),$id,$amount,date('Y-m-d'),'bank','manual']);$s=$this->db->prepare('SELECT COALESCE(SUM(amount),0) FROM payments WHERE document_id=?');$s->execute([$id]);$paid=(float)$s->fetchColumn();$status=$paid>=$d['total_with_vat']-0.01?'paid':'partially_paid';$this->db->prepare('UPDATE documents SET payment_status=? WHERE id=?')->execute([$status,$id]);if($status==='paid'){ $q=$this->db->prepare('SELECT d.doc_number,d.public_token,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');$q->execute([$id,Auth::workspaceId()]);$x=$q->fetch();if($x&&$x['email']&&$this->workspaceMail(Auth::workspaceId(),'receipt'))$this->queueEmail(Auth::workspaceId(),$x['email'],'Potvrzení úhrady '.$x['doc_number'],'Dobrý den, potvrzujeme přijetí úhrady faktury '.$x['doc_number'].'.',null,rtrim(Env::get('APP_URL',''),'/').'/d/'.$x['public_token']);}Response::redirect('/documents');}
     public function convertToJob(int $id):void{Auth::require();Auth::verifyCsrf();$s=$this->db->prepare('SELECT * FROM documents WHERE id=? AND workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen.');if($d['doc_type']!=='offer' || $d['status']!=='accepted')Response::abort(422,'Na zakázku lze převést pouze schválenou nabídku.');$this->db->prepare('INSERT INTO jobs(workspace_id,customer_id,name,description,budget,status,source_document_id) VALUES(?,?,?,?,?,?,?)')->execute([Auth::workspaceId(),$d['customer_id'],'Zakázka '.$d['doc_number'],'Vytvořeno z nabídky.', $d['total_with_vat'],'planned',$id]);Response::redirect('/jobs');}

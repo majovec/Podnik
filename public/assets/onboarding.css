@@ -52,3 +52,20 @@
   .onboarding-content .ob-actions:last-of-type{position:sticky;bottom:0;z-index:10;background:#fff;padding:12px 0 6px;margin-top:12px;}
   .onboarding-content .ob-actions:last-of-type .ob-btn.primary{display:inline-flex !important;visibility:visible !important;opacity:1 !important;}
 }
+
+
+/* r27: onboarding step 2 and final step are explicit semantic states. */
+.ob-company-form-r25{display:grid !important;visibility:visible !important;opacity:1 !important;position:relative !important;height:auto !important;max-height:none !important;overflow:visible !important;}
+.ob-company-form-r25 .ob-field,.ob-company-form-r25 .ob-fields,.ob-company-form-r25 .ob-check,.ob-company-form-r25 .ob-actions,.ob-company-form-r25 .ob-form-title{display:block !important;visibility:visible !important;opacity:1 !important;}
+.ob-company-form-r25 .ob-fields{display:grid !important;}
+.ob-company-form-r25 .ob-actions{display:flex !important;}
+.ob-finish-form{display:block !important;visibility:visible !important;opacity:1 !important;margin:0 !important;padding:0 !important;}
+.ob-finish-form .ob-btn{display:inline-flex !important;visibility:visible !important;opacity:1 !important;}
+@media(max-width:760px){
+  .ob-company-form-r25{display:grid !important;gap:10px !important;}
+  .ob-company-form-r25 .ob-field,.ob-company-form-r25 .ob-fields,.ob-company-form-r25 .ob-check{display:block !important;}
+  .ob-company-form-r25 .ob-fields{display:grid !important;grid-template-columns:1fr !important;}
+  .ob-company-form-r25 .ob-actions{display:flex !important;position:static !important;}
+  .ob-finish-form{display:block !important;}
+  .ob-finish-form .ob-btn{display:inline-flex !important;width:auto !important;}
+}

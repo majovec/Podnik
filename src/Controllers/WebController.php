@@ -48,18 +48,18 @@ final class WebController {
         header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         header('Pragma: no-cache');
         header('Expires: 0');
-        header('X-Byznio-Onboarding: 2026.09.22-r29');
+        header('X-Byznio-Onboarding: 2026.09.22-r30');
         if(!$this->needsOnboarding()){ Response::redirect('/'); }
         $step=max(1,min(7,(int)($_GET['step']??1)));
         $company=$this->company();
         // R28: company and final onboarding steps have dedicated server-rendered views.
         // This removes any ambiguity from conditional markup in the shared step template.
         if($step===2){
-            View::render('onboarding/company',['title'=>'Nastavme tvoji firmu','step'=>2,'company'=>$company]);
+            View::renderStandalone('onboarding/standalone',['title'=>'Nastavme tvoji firmu','step'=>2,'company'=>$company]);
             return;
         }
         if($step===7){
-            View::render('onboarding/final',['title'=>'Nia je součástí Byznia','step'=>7]);
+            View::renderStandalone('onboarding/standalone',['title'=>'Nia je součástí Byznia','step'=>7,'company'=>$company]);
             return;
         }
         View::render('onboarding/index',['title'=>'Vítejte v Byzniu','step'=>$step,'company'=>$company]);

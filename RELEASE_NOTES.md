@@ -1,7 +1,8 @@
-# Release notes — R29
+# R30 release notes
 
-## Onboarding definitive repair
-- Step 2 company form is rendered by a dedicated server view with self-contained CSS and forced visible controls.
-- Step 7 completion button is rendered by a dedicated server view with a mobile sticky action bar.
-- Onboarding no longer depends on `byznio_new_registration` session state; an authenticated workspace with incomplete onboarding can continue the wizard.
-- `/uvod` sends `Cache-Control: no-store` and an R29 diagnostic response header.
+- Steps 2 and 7 now use a completely standalone server-rendered onboarding page.
+- No shared app layout or legacy onboarding CSS participates in those two screens.
+- Added no-cache response headers and `X-Byznio-Onboarding: 2026.09.22-r30`.
+- Step 2 contains the company form directly in the returned HTML.
+- Step 7 contains the completion form directly in the returned HTML.
+- Mobile layout keeps the primary action visible.

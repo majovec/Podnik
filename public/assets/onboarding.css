@@ -42,3 +42,13 @@
   .ob-company-form-r25 .ob-actions{display:flex !important;visibility:visible !important;opacity:1 !important;}
   .ob-company-form-r25 .ob-btn.primary{display:inline-flex !important;visibility:visible !important;opacity:1 !important;}
 }
+
+/* r26: render company step by its semantic type and keep final action visible on mobile */
+.ob-company-form-r25{display:grid !important;visibility:visible !important;opacity:1 !important;min-height:1px !important;}
+.onboarding-content .ob-company-form-r25 .ob-actions{display:flex !important;}
+@media(max-width:760px){
+  .onboarding-content .ob-company-form-r25{display:grid !important;visibility:visible !important;opacity:1 !important;}
+  .onboarding-content .ob-company-form-r25 > *{visibility:visible !important;opacity:1 !important;}
+  .onboarding-content .ob-actions:last-of-type{position:sticky;bottom:0;z-index:10;background:#fff;padding:12px 0 6px;margin-top:12px;}
+  .onboarding-content .ob-actions:last-of-type .ob-btn.primary{display:inline-flex !important;visibility:visible !important;opacity:1 !important;}
+}

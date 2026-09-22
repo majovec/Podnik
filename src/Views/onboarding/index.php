@@ -26,7 +26,7 @@ $prev=$step>1?'/uvod?step='.($step-1):null;
       <h1><?=$headline?></h1>
       <p><?=$copy?></p>
 
-      <?php if($step===2): ?>
+      <?php if($type==='company'): ?>
         <form class="ob-company-form ob-company-form-r25" method="post" action="/uvod/company" autocomplete="on">
           <input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>">
           <div class="ob-form-title"><b>Údaje o firmě</b><span>Vyplň jen to, co máš po ruce.</span></div>
@@ -60,7 +60,7 @@ $prev=$step>1?'/uvod?step='.($step-1):null;
         <div class="ob-preview nia-preview"><div class="nia-mini-orb"><span>✦</span></div><div><b>„Dnes máš 3 úkoly.“</b><small>Nia může sama říct, co je potřeba řešit, a po kliknutí jí můžeš zadat vlastní úkol.</small></div><div class="nia-input-demo">Napiš Nii, co potřebuješ… <strong>Poslat</strong></div></div>
       <?php endif; ?>
 
-      <?php if($type!=='company'): ?>
+      <?php if($type!=='company' || $step===7): ?>
         <div class="ob-actions"><div><?php if($prev): ?><a class="ob-btn" href="<?=$prev?>">← Zpět</a><?php endif; ?></div><?php if($next): ?><a class="ob-btn primary" href="<?=$next?>">Pokračovat →</a><?php else: ?><form method="post" action="/uvod/complete"><input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>"><button class="ob-btn primary" type="submit">Dokončit a otevřít Byznio →</button></form><?php endif; ?></div>
       <?php endif; ?>
       <div class="ob-skip"><form method="post" action="/uvod/skip"><input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>"><button type="submit">Přeskočit průvodce</button></form></div>

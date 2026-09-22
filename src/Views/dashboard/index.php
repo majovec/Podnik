@@ -4,7 +4,7 @@ $receivables=max(0,$monthRevenue-$monthPaid); $cashflow=$monthPaid-$monthExpense
 $invoiceCount=(int)($k['invoice_count']??0); $overdueCount=(int)($k['overdue']??0); $jobsCount=(int)($k['jobs']??0); $customersCount=(int)($k['customers']??0);
 $maxChart=1; foreach(($monthly??[]) as $m){$maxChart=max($maxChart,(float)$m['revenue'],(float)$m['expenses']);}
 ?>
-<div class="dashboard-ref" data-dashboard-build="2026.09.22-r36">
+<div class="dashboard-ref" data-dashboard-build="2026.09.22-r37">
   <div class="dash-ref-desktop">
     <div class="dash-ref-heading"><div><div class="dash-ref-eyebrow">PŘEHLED</div><h1>Přehled</h1></div><div class="dash-ref-date">Dnes · <?=date('j. n. Y')?></div></div>
     <section class="dash-ref-kpis">

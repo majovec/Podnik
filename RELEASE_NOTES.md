@@ -1,7 +1,7 @@
-# Byznio r24
+# Release notes — R29
 
-- Onboarding step 2 is now a real company setup form with visible fields and navigation on mobile.
-- Added company name, IČO, DIČ, street, city, ZIP and phone fields.
-- ARES lookup can fill company/address data.
-- Mobile onboarding card is compact enough for iPhone viewport; the primary action stays visible.
-- Existing r23 mobile menu fix retained.
+## Onboarding definitive repair
+- Step 2 company form is rendered by a dedicated server view with self-contained CSS and forced visible controls.
+- Step 7 completion button is rendered by a dedicated server view with a mobile sticky action bar.
+- Onboarding no longer depends on `byznio_new_registration` session state; an authenticated workspace with incomplete onboarding can continue the wizard.
+- `/uvod` sends `Cache-Control: no-store` and an R29 diagnostic response header.

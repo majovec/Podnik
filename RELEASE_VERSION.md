@@ -1,6 +1,7 @@
-Byznio r28 — dedicated onboarding rendering
+# Byznio release
 
-- Step 2 now uses a dedicated server-rendered company form view.
-- Step 7 now uses a dedicated server-rendered completion view with an explicit finish form.
-- The shared onboarding template no longer controls whether those two critical controls exist.
-- Build/version stamps are aligned to 2026.09.22-r28.
+## 2026.09.22-r29
+- Definitive server-rendered onboarding step 2 and step 7 with self-contained mobile-safe markup/CSS.
+- Onboarding access is based on workspace `onboarding_completed_at`, not the transient registration session flag.
+- `/uvod` sends no-cache headers and `X-Byznio-Onboarding: 2026.09.22-r29`.
+- Step 2 form and step 7 completion action use unique R29 selectors and inline CSS so older cached onboarding CSS cannot hide them.

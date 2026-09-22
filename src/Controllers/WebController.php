@@ -43,7 +43,13 @@ final class WebController {
     }
     public function onboarding():void{
         Auth::require();
-        if(empty($_SESSION['byznio_new_registration']) || !$this->needsOnboarding()){ Response::redirect('/'); }
+        // R29: onboarding is determined by the workspace state, not a fragile session flag.
+        // This also keeps the wizard available after a session renewal/reload during registration.
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+        header('X-Byznio-Onboarding: 2026.09.22-r29');
+        if(!$this->needsOnboarding()){ Response::redirect('/'); }
         $step=max(1,min(7,(int)($_GET['step']??1)));
         $company=$this->company();
         // R28: company and final onboarding steps have dedicated server-rendered views.

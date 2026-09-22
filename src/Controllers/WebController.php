@@ -50,9 +50,10 @@ final class WebController {
     }
     public function onboardingCompany():void{
         Auth::require();Auth::verifyCsrf();
-        $ico=preg_replace('/\D/','',(string)($_POST['ico']??''));$d=['ico'=>$ico,'dic'=>trim((string)($_POST['dic']??'')),'street'=>trim((string)($_POST['street']??'')),'city'=>trim((string)($_POST['city']??'')),'zip'=>trim((string)($_POST['zip']??''))];
+        $ico=preg_replace('/\D/','',(string)($_POST['ico']??''));$d=['name'=>trim((string)($_POST['company_name']??'')),'ico'=>$ico,'dic'=>trim((string)($_POST['dic']??'')),'street'=>trim((string)($_POST['street']??'')),'city'=>trim((string)($_POST['city']??'')),'zip'=>trim((string)($_POST['zip']??'')),'phone'=>trim((string)($_POST['phone']??''))];
         if($ico!=='' && !empty($_POST['ares'])){try{$a=AresService::lookup($ico);if($a)$d=array_merge($d,$a);}catch(\Throwable $e){}}
-        $this->db->prepare('UPDATE workspaces SET ico=?,dic=?,street=?,city=?,zip=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$d['ico']?:null,$d['dic']?:null,$d['street']?:null,$d['city']?:null,$d['zip']?:null,Auth::workspaceId()]);
+        if($d['name']==='')$d['name']=$this->company()['name']??'Byznio';
+        $this->db->prepare('UPDATE workspaces SET name=?,ico=?,dic=?,street=?,city=?,zip=?,phone=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$d['name'],$d['ico']?:null,$d['dic']?:null,$d['street']?:null,$d['city']?:null,$d['zip']?:null,$d['phone']?:null,Auth::workspaceId()]);
         Response::redirect('/uvod?step=3');
     }
     public function onboardingComplete():void{Auth::require();Auth::verifyCsrf();$this->db->prepare('UPDATE workspaces SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([Auth::workspaceId()]);unset($_SESSION['byznio_new_registration']);Response::redirect('/');}

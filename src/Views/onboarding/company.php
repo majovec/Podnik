@@ -16,31 +16,31 @@ $prev='/uvod?step=1';
       <p>Stačí základní údaje. IČO může Byznio použít pro načtení údajů z ARES. Ostatní můžeš kdykoli doplnit v Nastavení.</p>
 
       <form class="r29-company-form" method="post" action="/uvod/company" autocomplete="on">
-        <input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>">
+        <input type="hidden" name="_csrf" value="<?=\App\Core\View::e(App\Core\Auth::csrf())?>">
         <div class="r29-form-heading"><strong>Údaje o firmě</strong><span>Vyplň jen to, co máš po ruce.</span></div>
         <div class="r29-field">
           <label for="r29-company-name">Název firmy</label>
-          <input id="r29-company-name" name="company_name" autocomplete="organization" placeholder="např. Novák servis s.r.o." value="<?=View::e($company['name']??'')?>">
+          <input id="r29-company-name" name="company_name" autocomplete="organization" placeholder="např. Novák servis s.r.o." value="<?=\App\Core\View::e($company['name']??'')?>">
         </div>
         <div class="r29-grid">
-          <div class="r29-field"><label for="r29-ico">IČO</label><input id="r29-ico" name="ico" inputmode="numeric" autocomplete="off" placeholder="12345678" value="<?=View::e($company['ico']??'')?>"></div>
-          <div class="r29-field"><label for="r29-dic">DIČ</label><input id="r29-dic" name="dic" placeholder="CZ12345678" value="<?=View::e($company['dic']??'')?>"></div>
+          <div class="r29-field"><label for="r29-ico">IČO</label><input id="r29-ico" name="ico" inputmode="numeric" autocomplete="off" placeholder="12345678" value="<?=\App\Core\View::e($company['ico']??'')?>"></div>
+          <div class="r29-field"><label for="r29-dic">DIČ</label><input id="r29-dic" name="dic" placeholder="CZ12345678" value="<?=\App\Core\View::e($company['dic']??'')?>"></div>
         </div>
         <label class="r29-check"><input type="checkbox" name="ares" value="1" checked><span><b>Načíst údaje z ARES</b><small>Po zadání IČO doplníme dostupné údaje automaticky.</small></span></label>
         <div class="r29-grid">
-          <div class="r29-field"><label for="r29-street">Ulice a číslo</label><input id="r29-street" name="street" autocomplete="street-address" placeholder="Hlavní 123" value="<?=View::e($company['street']??'')?>"></div>
-          <div class="r29-field"><label for="r29-city">Město</label><input id="r29-city" name="city" autocomplete="address-level2" placeholder="Ostrava" value="<?=View::e($company['city']??'')?>"></div>
+          <div class="r29-field"><label for="r29-street">Ulice a číslo</label><input id="r29-street" name="street" autocomplete="street-address" placeholder="Hlavní 123" value="<?=\App\Core\View::e($company['street']??'')?>"></div>
+          <div class="r29-field"><label for="r29-city">Město</label><input id="r29-city" name="city" autocomplete="address-level2" placeholder="Ostrava" value="<?=\App\Core\View::e($company['city']??'')?>"></div>
         </div>
         <div class="r29-grid">
-          <div class="r29-field"><label for="r29-zip">PSČ</label><input id="r29-zip" name="zip" inputmode="numeric" autocomplete="postal-code" placeholder="702 00" value="<?=View::e($company['zip']??'')?>"></div>
-          <div class="r29-field"><label for="r29-phone">Telefon</label><input id="r29-phone" name="phone" type="tel" autocomplete="tel" placeholder="+420 777 123 456" value="<?=View::e($company['phone']??'')?>"></div>
+          <div class="r29-field"><label for="r29-zip">PSČ</label><input id="r29-zip" name="zip" inputmode="numeric" autocomplete="postal-code" placeholder="702 00" value="<?=\App\Core\View::e($company['zip']??'')?>"></div>
+          <div class="r29-field"><label for="r29-phone">Telefon</label><input id="r29-phone" name="phone" type="tel" autocomplete="tel" placeholder="+420 777 123 456" value="<?=\App\Core\View::e($company['phone']??'')?>"></div>
         </div>
         <div class="r29-actions">
           <a class="r29-btn secondary" href="<?=$prev?>">← Zpět</a>
           <button class="r29-btn primary" type="submit">Uložit a pokračovat →</button>
         </div>
       </form>
-      <div class="r29-skip"><form method="post" action="/uvod/skip"><input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>"><button type="submit">Přeskočit průvodce</button></form></div>
+      <div class="r29-skip"><form method="post" action="/uvod/skip"><input type="hidden" name="_csrf" value="<?=\App\Core\View::e(App\Core\Auth::csrf())?>"><button type="submit">Přeskočit průvodce</button></form></div>
     </div>
   </div>
 </div>

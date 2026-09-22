@@ -5,12 +5,12 @@
 .ai-avatar{overflow:hidden;position:relative}.ai-avatar img{width:100%;height:100%;object-fit:cover;object-position:50% 17%;display:block;animation:niaAiFloat 4.8s ease-in-out infinite}.ai-avatar.thinking img{animation:niaAiThink 1.1s ease-in-out infinite}.ai-mini-avatar{overflow:hidden}.ai-mini-avatar img{width:100%;height:100%;object-fit:cover;object-position:50% 17%;display:block}@keyframes niaAiFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}@keyframes niaAiThink{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-4px) rotate(-1deg)}}</style>
 <div class="ai-shell">
 <div class="page-head"><div><h1>AI asistent</h1><div class="sub">Nia zná kontext vaší firmy a pomůže vám s každodenní prací.</div></div></div>
-<div class="ai-hero"><div class="ai-avatar <?=!empty($attention)?'alert':'idle'?>" data-avatar><img src="/assets/nia.png" alt="Nia"></div><div class="ai-bubble"><strong>Ahoj, já jsem Nia.</strong><?php foreach(($briefing??[]) as $line): ?><div><?=View::e($line)?></div><?php endforeach; ?></div></div>
-<ul class="ai-brief"><?php foreach(($briefing??[]) as $line): ?><li><?=View::e($line)?></li><?php endforeach; ?></ul>
+<div class="ai-hero"><div class="ai-avatar <?=!empty($attention)?'alert':'idle'?>" data-avatar><img src="/assets/nia.png" alt="Nia"></div><div class="ai-bubble"><strong>Ahoj, já jsem Nia.</strong><?php foreach(($briefing??[]) as $line): ?><div><?=\App\Core\View::e($line)?></div><?php endforeach; ?></div></div>
+<ul class="ai-brief"><?php foreach(($briefing??[]) as $line): ?><li><?=\App\Core\View::e($line)?></li><?php endforeach; ?></ul>
 <div class="ai-chat" id="aiChat"></div>
-<div class="ai-chips" id="aiChips"><?php foreach(($chips??[]) as $chip): ?><button type="button" class="ai-chip" data-prompt="<?=View::e($chip)?>"><?=View::e($chip)?></button><?php endforeach; ?></div>
+<div class="ai-chips" id="aiChips"><?php foreach(($chips??[]) as $chip): ?><button type="button" class="ai-chip" data-prompt="<?=\App\Core\View::e($chip)?>"><?=\App\Core\View::e($chip)?></button><?php endforeach; ?></div>
 <div id="aiPending"></div>
-<div class="ai-composer"><form id="aiForm"><input type="hidden" name="_csrf" value="<?=View::e($csrf??App\Core\Auth::csrf())?>"><textarea id="aiPrompt" name="prompt" placeholder="Napište Nii, co potřebujete…" rows="1"></textarea><button class="btn accent" type="submit">Odeslat</button></form><div class="ai-status" id="aiStatus" aria-live="polite"></div></div>
+<div class="ai-composer"><form id="aiForm"><input type="hidden" name="_csrf" value="<?=\App\Core\View::e($csrf??App\Core\Auth::csrf())?>"><textarea id="aiPrompt" name="prompt" placeholder="Napište Nii, co potřebujete…" rows="1"></textarea><button class="btn accent" type="submit">Odeslat</button></form><div class="ai-status" id="aiStatus" aria-live="polite"></div></div>
 </div>
 <script>
 (function(){

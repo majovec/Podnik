@@ -28,21 +28,21 @@ $prev=$step>1?'/uvod?step='.($step-1):null;
 
       <?php if((int)$step===2): ?>
         <form class="ob-company-form ob-company-form-r25" method="post" action="/uvod/company" autocomplete="on">
-          <input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>">
+          <input type="hidden" name="_csrf" value="<?=\App\Core\View::e(App\Core\Auth::csrf())?>">
           <div class="ob-form-title"><b>Údaje o firmě</b><span>Vyplň jen to, co máš po ruce.</span></div>
-          <div class="ob-field"><label>Název firmy</label><input name="company_name" autocomplete="organization" placeholder="např. Novák servis s.r.o." value="<?=View::e($company['name']??'')?>"></div>
+          <div class="ob-field"><label>Název firmy</label><input name="company_name" autocomplete="organization" placeholder="např. Novák servis s.r.o." value="<?=\App\Core\View::e($company['name']??'')?>"></div>
           <div class="ob-fields">
-            <div class="ob-field"><label>IČO</label><input name="ico" inputmode="numeric" autocomplete="off" placeholder="12345678" value="<?=View::e($company['ico']??'')?>"></div>
-            <div class="ob-field"><label>DIČ</label><input name="dic" placeholder="CZ12345678" value="<?=View::e($company['dic']??'')?>"></div>
+            <div class="ob-field"><label>IČO</label><input name="ico" inputmode="numeric" autocomplete="off" placeholder="12345678" value="<?=\App\Core\View::e($company['ico']??'')?>"></div>
+            <div class="ob-field"><label>DIČ</label><input name="dic" placeholder="CZ12345678" value="<?=\App\Core\View::e($company['dic']??'')?>"></div>
           </div>
           <label class="ob-check"><input type="checkbox" name="ares" value="1" checked> <span><b>Načíst údaje z ARES</b><small>Po zadání IČO doplníme dostupné údaje automaticky.</small></span></label>
           <div class="ob-fields">
-            <div class="ob-field"><label>Ulice a číslo</label><input name="street" autocomplete="street-address" placeholder="Hlavní 123" value="<?=View::e($company['street']??'')?>"></div>
-            <div class="ob-field"><label>Město</label><input name="city" autocomplete="address-level2" placeholder="Ostrava" value="<?=View::e($company['city']??'')?>"></div>
+            <div class="ob-field"><label>Ulice a číslo</label><input name="street" autocomplete="street-address" placeholder="Hlavní 123" value="<?=\App\Core\View::e($company['street']??'')?>"></div>
+            <div class="ob-field"><label>Město</label><input name="city" autocomplete="address-level2" placeholder="Ostrava" value="<?=\App\Core\View::e($company['city']??'')?>"></div>
           </div>
           <div class="ob-fields ob-fields-last">
-            <div class="ob-field"><label>PSČ</label><input name="zip" inputmode="numeric" autocomplete="postal-code" placeholder="702 00" value="<?=View::e($company['zip']??'')?>"></div>
-            <div class="ob-field"><label>Telefon</label><input name="phone" type="tel" autocomplete="tel" placeholder="+420 777 123 456" value="<?=View::e($company['phone']??'')?>"></div>
+            <div class="ob-field"><label>PSČ</label><input name="zip" inputmode="numeric" autocomplete="postal-code" placeholder="702 00" value="<?=\App\Core\View::e($company['zip']??'')?>"></div>
+            <div class="ob-field"><label>Telefon</label><input name="phone" type="tel" autocomplete="tel" placeholder="+420 777 123 456" value="<?=\App\Core\View::e($company['phone']??'')?>"></div>
           </div>
           <div class="ob-actions"><a class="ob-btn" href="/uvod?step=1">← Zpět</a><button class="ob-btn primary" type="submit">Uložit a pokračovat →</button></div>
         </form>
@@ -61,9 +61,9 @@ $prev=$step>1?'/uvod?step='.($step-1):null;
       <?php endif; ?>
 
       <?php if((int)$step!==2): ?>
-        <div class="ob-actions"><div><?php if($prev): ?><a class="ob-btn" href="<?=$prev?>">← Zpět</a><?php endif; ?></div><?php if($next): ?><a class="ob-btn primary" href="<?=$next?>">Pokračovat →</a><?php else: ?><form method="post" action="/uvod/complete" class="ob-finish-form"><input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>"><button class="ob-btn primary" type="submit">Dokončit a otevřít Byznio →</button></form><?php endif; ?></div>
+        <div class="ob-actions"><div><?php if($prev): ?><a class="ob-btn" href="<?=$prev?>">← Zpět</a><?php endif; ?></div><?php if($next): ?><a class="ob-btn primary" href="<?=$next?>">Pokračovat →</a><?php else: ?><form method="post" action="/uvod/complete" class="ob-finish-form"><input type="hidden" name="_csrf" value="<?=\App\Core\View::e(App\Core\Auth::csrf())?>"><button class="ob-btn primary" type="submit">Dokončit a otevřít Byznio →</button></form><?php endif; ?></div>
       <?php endif; ?>
-      <div class="ob-skip"><form method="post" action="/uvod/skip"><input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>"><button type="submit">Přeskočit průvodce</button></form></div>
+      <div class="ob-skip"><form method="post" action="/uvod/skip"><input type="hidden" name="_csrf" value="<?=\App\Core\View::e(App\Core\Auth::csrf())?>"><button type="submit">Přeskočit průvodce</button></form></div>
     </div>
   </div>
 </div>

@@ -15,9 +15,9 @@
       <div class="r29-preview"><div class="r29-orb">✦</div><div><strong>„Dnes máš 3 úkoly.“</strong><span>Nia může sama říct, co je potřeba řešit, a po kliknutí jí můžeš zadat vlastní úkol.</span></div><div class="r29-demo">Napiš Nii, co potřebuješ… <b>Poslat</b></div></div>
       <div class="r29-final-actions">
         <a class="r29-btn secondary" href="<?=$prev?>">← Zpět</a>
-        <form method="post" action="/uvod/complete" class="r29-finish-form"><input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>"><button class="r29-btn primary" type="submit">Dokončit a otevřít Byznio →</button></form>
+        <form method="post" action="/uvod/complete" class="r29-finish-form"><input type="hidden" name="_csrf" value="<?=\App\Core\View::e(App\Core\Auth::csrf())?>"><button class="r29-btn primary" type="submit">Dokončit a otevřít Byznio →</button></form>
       </div>
-      <div class="r29-skip"><form method="post" action="/uvod/skip"><input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>"><button type="submit">Přeskočit průvodce</button></form></div>
+      <div class="r29-skip"><form method="post" action="/uvod/skip"><input type="hidden" name="_csrf" value="<?=\App\Core\View::e(App\Core\Auth::csrf())?>"><button type="submit">Přeskočit průvodce</button></form></div>
     </div>
   </div>
 </div>

@@ -69,3 +69,11 @@
   .ob-finish-form{display:block !important;}
   .ob-finish-form .ob-btn{display:inline-flex !important;width:auto !important;}
 }
+
+
+/* Byznio R28: dedicated onboarding step views */
+.onboarding-r28 .ob-company-form-r28{display:grid !important;visibility:visible !important;opacity:1 !important;position:relative !important;height:auto !important;max-height:none !important;overflow:visible !important;}
+.onboarding-r28 .ob-company-form-r28 .ob-field,.onboarding-r28 .ob-company-form-r28 .ob-check{display:block !important;visibility:visible !important;opacity:1 !important;}
+.onboarding-r28 .ob-company-form-r28 .ob-fields{display:grid !important;}
+.onboarding-r28 .ob-finish-form-r28{display:block !important;visibility:visible !important;opacity:1 !important;}
+.onboarding-r28 .ob-finish-form-r28 .ob-btn{display:inline-flex !important;visibility:visible !important;opacity:1 !important;}

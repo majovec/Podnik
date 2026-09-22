@@ -20,7 +20,7 @@ final class Kernel {
         $r->get('/login',fn()=> $w->login()); $r->post('/login',fn()=> $w->loginPost());
         $r->get('/register',fn()=> $w->register()); $r->post('/register',fn()=> $w->registerPost());
         $r->post('/logout',fn()=> $w->logout());
-        $r->get('/uvod',fn()=> $w->onboarding()); $r->post('/uvod/company',fn()=> $w->onboardingCompany()); $r->post('/uvod/complete',fn()=> $w->onboardingComplete()); $r->post('/uvod/skip',fn()=> $w->onboardingSkip());
+        $r->get('/uvod',fn()=> $w->onboarding()); $r->post('/uvod/ares',fn()=> $w->onboardingAres()); $r->post('/uvod/company',fn()=> $w->onboardingCompany()); $r->post('/uvod/complete',fn()=> $w->onboardingComplete()); $r->post('/uvod/skip',fn()=> $w->onboardingSkip());
         $r->get('/customers',fn()=> $w->customers()); $r->get('/customers/new',fn()=> $w->customerForm()); $r->post('/customers/save',fn()=> $w->customerSave());
         $r->get('/customers/{id}',fn($id)=>$w->customerDetail((int)$id)); $r->post('/customers/{id}/communication',fn($id)=>$w->communicationSave((int)$id)); $r->get('/customers/{id}/edit',fn($id)=>$w->customerEdit((int)$id)); $r->post('/customers/{id}/update',fn($id)=>$w->customerUpdate((int)$id));
         $r->get('/d/{token}',fn($token)=>$w->publicDocument($token)); $r->post('/d/{token}/respond',fn($token)=>$w->publicOfferRespond($token)); $r->post('/d/{token}/pay',fn($token)=>$w->publicPay($token));

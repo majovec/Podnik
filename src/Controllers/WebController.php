@@ -13,7 +13,7 @@ final class WebController {
         $queries=['customers'=>'SELECT COUNT(*) FROM customers WHERE workspace_id=? AND active=1','invoices'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice"','overdue'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND payment_status!="paid" AND due_date<date("now")','jobs'=>'SELECT COUNT(*) FROM jobs WHERE workspace_id=? AND status NOT IN ("done","cancelled")'];
         foreach($queries as $key=>$q){$st=$this->db->prepare($q);$st->execute([$wid]);$k[$key]=(int)$st->fetchColumn();}
         foreach(['revenue'=>'SELECT COALESCE(SUM(total_with_vat),0) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND issue_date>=date("now","start of month")','expenses'=>'SELECT COALESCE(SUM(amount),0) FROM expenses WHERE workspace_id=? AND expense_date>=date("now","start of month")','paid'=>'SELECT COALESCE(SUM(amount),0) FROM payments WHERE workspace_id=? AND paid_at>=date("now","start of month")'] as $key=>$q){$st=$this->db->prepare($q);$st->execute([$wid]);$k[$key]=(float)$st->fetchColumn();}
-        $k['cashflow']=$k['paid']-$k['expenses'];$st=$this->db->prepare('SELECT COALESCE(SUM(stock*purchase_price),0) FROM products WHERE workspace_id=? AND active=1');$st->execute([$wid]);$k['stock']=(float)$st->fetchColumn();
+        $k['invoice_count']=$k['invoices'];$k['cashflow']=$k['paid']-$k['expenses'];$st=$this->db->prepare('SELECT COALESCE(SUM(stock*purchase_price),0) FROM products WHERE workspace_id=? AND active=1');$st->execute([$wid]);$k['stock']=(float)$st->fetchColumn();
         $alerts=$this->scope('SELECT id,doc_number,total_with_vat,due_date FROM documents WHERE workspace_id=? AND doc_type="invoice" AND payment_status!="paid" AND due_date<date("now") ORDER BY due_date LIMIT 8');
         $events=$this->scope('SELECT * FROM calendar_events WHERE workspace_id=? AND start_at>=datetime("now") ORDER BY start_at LIMIT 6');
         $tasks=$this->scope('SELECT * FROM tasks WHERE workspace_id=? AND status="open" ORDER BY CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,due_at LIMIT 8');
@@ -48,7 +48,7 @@ final class WebController {
         header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         header('Pragma: no-cache');
         header('Expires: 0');
-        header('X-Byznio-Onboarding: 2026.09.22-r30');
+        header('X-Byznio-Onboarding: 2026.09.22-r31');
         if(!$this->needsOnboarding()){ Response::redirect('/'); }
         $step=max(1,min(7,(int)($_GET['step']??1)));
         $company=$this->company();
@@ -63,6 +63,19 @@ final class WebController {
             return;
         }
         View::render('onboarding/index',['title'=>'Vítejte v Byzniu','step'=>$step,'company'=>$company]);
+    }
+    public function onboardingAres():void{
+        Auth::require();
+        Auth::verifyCsrf();
+        $ico=preg_replace('/\D/','',(string)($_POST['ico']??''));
+        if(strlen($ico)!==8){ Response::json(['ok'=>false,'error'=>'IČO musí mít 8 číslic.'],422); }
+        try{
+            $data=AresService::lookup($ico);
+            if(!$data){ Response::json(['ok'=>false,'error'=>'Firma podle tohoto IČO nebyla v ARES nalezena.'],404); }
+            Response::json(['ok'=>true,'data'=>$data]);
+        }catch(\Throwable $e){
+            Response::json(['ok'=>false,'error'=>'ARES je momentálně nedostupný. Zkus to prosím za chvíli.'],502);
+        }
     }
     public function onboardingCompany():void{
         Auth::require();Auth::verifyCsrf();

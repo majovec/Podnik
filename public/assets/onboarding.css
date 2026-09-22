@@ -28,3 +28,17 @@
   .ob-skip{margin-top:7px;font-size:9px}
   @keyframes obFloatMobile24{0%,100%{transform:scale(.34) translateY(0)}50%{transform:scale(.34) translateY(-6px)}}
 }
+
+
+/* r25: step 2 is always a real company setup form; mobile Safari must show it */
+.ob-company-form-r25{display:grid !important;visibility:visible !important;opacity:1 !important;width:100%;position:relative;z-index:3;}
+.ob-company-form-r25 input,.ob-company-form-r25 button{font-family:inherit;}
+@media(max-width:760px){
+  .onboarding-shell{min-height:auto !important;height:auto !important;overflow:visible !important;padding-bottom:38px !important;}
+  .onboarding-card{height:auto !important;max-height:none !important;overflow:visible !important;}
+  .onboarding-content{height:auto !important;max-height:none !important;overflow:visible !important;}
+  .ob-company-form-r25{display:grid !important;gap:10px !important;}
+  .ob-company-form-r25 .ob-field input{display:block !important;visibility:visible !important;opacity:1 !important;background:#fff !important;color:#172b4d !important;}
+  .ob-company-form-r25 .ob-actions{display:flex !important;visibility:visible !important;opacity:1 !important;}
+  .ob-company-form-r25 .ob-btn.primary{display:inline-flex !important;visibility:visible !important;opacity:1 !important;}
+}

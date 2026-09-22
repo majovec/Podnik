@@ -26,8 +26,8 @@ $prev=$step>1?'/uvod?step='.($step-1):null;
       <h1><?=$headline?></h1>
       <p><?=$copy?></p>
 
-      <?php if($type==='company'): ?>
-        <form class="ob-company-form" method="post" action="/uvod/company">
+      <?php if($step===2): ?>
+        <form class="ob-company-form ob-company-form-r25" method="post" action="/uvod/company" autocomplete="on">
           <input type="hidden" name="_csrf" value="<?=View::e(App\Core\Auth::csrf())?>">
           <div class="ob-form-title"><b>Údaje o firmě</b><span>Vyplň jen to, co máš po ruce.</span></div>
           <div class="ob-field"><label>Název firmy</label><input name="company_name" autocomplete="organization" placeholder="např. Novák servis s.r.o." value="<?=View::e($company['name']??'')?>"></div>

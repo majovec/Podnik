@@ -24,11 +24,11 @@ $maxChart=1; foreach(($monthly??[]) as $m){$maxChart=max($maxChart,(float)$m['re
   </div>
   <div class="dash-ref-mobile">
     <div class="mobile-day">Dnes</div>
-    <a class="mobile-module" href="/documents"><span class="mobile-module-icon blue">▣</span><div><b>Faktury</b><small><?=number_format($newInvoiceCount,0,',',' ')?> <?= $newInvoiceCount===1?'nová':'nových' ?> tento měsíc</small></div><strong><?=\App\Core\View::money($monthRevenue)?></strong><span class="arrow">›</span></a>
-    <a class="mobile-module" href="/tasks"><span class="mobile-module-icon violet">✓</span><div><b>Úkoly</b><small><?=count($todayTasks??[])?> otevřené</small></div><span class="arrow">›</span></a>
-    <a class="mobile-module" href="/calendar"><span class="mobile-module-icon cyan">▦</span><div><b>Kalendář</b><small><?=count($events??[])?> událostí</small></div><span class="arrow">›</span></a>
-    <a class="mobile-module" href="/bank"><span class="mobile-module-icon navy">▣</span><div><b>Bankovní účty</b><small>Pohyby tento měsíc</small></div><strong><?=\App\Core\View::money($monthPaid)?></strong><span class="arrow">›</span></a>
-    <a class="mobile-module" href="/customers"><span class="mobile-module-icon green">♙</span><div><b>Zákazníci</b><small><?=number_format($customersCount,0,',',' ')?> v CRM</small></div><span class="arrow">›</span></a>
-    <a class="mobile-module" href="/jobs"><span class="mobile-module-icon purple">⌁</span><div><b>Zakázky</b><small><?=number_format($jobsCount,0,',',' ')?> aktivních</small></div><span class="arrow">›</span></a>
+    <a class="mobile-module" href="/documents"><span class="mobile-module-icon blue"><?=icon('file')?></span><div><b>Faktury</b><small><?=number_format($newInvoiceCount,0,',',' ')?> <?= $newInvoiceCount===1?'nová':'nových' ?> tento měsíc</small></div><strong><?=\App\Core\View::money($monthRevenue)?></strong><span class="arrow">›</span></a>
+    <a class="mobile-module" href="/tasks"><span class="mobile-module-icon violet"><?=icon('check')?></span><div><b>Úkoly</b><small><?=count($todayTasks??[])?> otevřené</small></div><span class="arrow">›</span></a>
+    <a class="mobile-module" href="/calendar"><span class="mobile-module-icon cyan"><?=icon('calendar')?></span><div><b>Kalendář</b><small><?=count($events??[])?> událostí</small></div><span class="arrow">›</span></a>
+    <a class="mobile-module" href="/bank"><span class="mobile-module-icon navy"><?=icon('bank')?></span><div><b>Bankovní účty</b><small>Pohyby tento měsíc</small></div><strong><?=\App\Core\View::money($monthPaid)?></strong><span class="arrow">›</span></a>
+    <a class="mobile-module" href="/customers"><span class="mobile-module-icon green"><?=icon('users')?></span><div><b>Zákazníci</b><small><?=number_format($customersCount,0,',',' ')?> v CRM</small></div><span class="arrow">›</span></a>
+    <a class="mobile-module" href="/jobs"><span class="mobile-module-icon purple"><?=icon('briefcase')?></span><div><b>Zakázky</b><small><?=number_format($jobsCount,0,',',' ')?> aktivních</small></div><span class="arrow">›</span></a>
   </div>
 </div>

@@ -2,7 +2,7 @@
 namespace App\Controllers;
 use PDO;
 use App\Core\{Auth,View,Response,Env};
-use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService,QrService};
+use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService};
 final class WebController {
     public function __construct(private PDO $db){}
     private function scope(string $sql,array $params=[]):array{$s=$this->db->prepare($sql);$s->execute([Auth::workspaceId(),...$params]);return $s->fetchAll();}
@@ -139,8 +139,20 @@ final class WebController {
             $this->db->commit();
         } catch(\Throwable $e) { if($this->db->inTransaction()) $this->db->rollBack(); throw $e; }
 
-        if($type==='invoice'){ $q=$this->db->prepare('SELECT * FROM customers WHERE id=? AND workspace_id=?');$q->execute([$cid,$wid]);$cust=$q->fetch();$from=$this->workspaceMail($wid,'invoice');if($cust&&$cust['email']&&$from){$dir=dirname(__DIR__,2).'/storage/mail';if(!is_dir($dir))@mkdir($dir,0775,true);try{$doc=['doc_type'=>'invoice','doc_number'=>$num,'variable_symbol'=>preg_replace('/\D/','',$num),'total_without_vat'=>$sub,'total_vat'=>$vatSum,'total_with_vat'=>$total,'issue_date'=>$_POST['issue_date']??date('Y-m-d'),'due_date'=>$_POST['due_date']??date('Y-m-d',strtotime('+14 days'))];$pdf=PdfService::invoice($doc,array_map(fn($it)=>['name'=>$it[0],'quantity'=>$it[1],'unit'=>$it[2],'unit_price'=>$it[3],'vat_rate'=>$it[4],'line_total'=>$it[5]],$items),$this->company(),$cust,rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken.'/qr');$file=$dir.'/'.$wid.'_'.$id.'.pdf';file_put_contents($file,$pdf);$this->queueEmail($wid,$cust['email'],'Faktura '.$num,'Dobrý den, v příloze zasíláme fakturu č. '.$num.'.',$file,rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken);}catch(\Throwable $e){$this->queueEmail($wid,$cust['email'],'Faktura '.$num,'Dobrý den, zasíláme fakturu č. '.$num.'.',null,rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken);}}}
-        if($type==='offer'){ $q=$this->db->prepare('SELECT * FROM customers WHERE id=? AND workspace_id=?');$q->execute([$cid,$wid]);$cust=$q->fetch();$from=$this->workspaceMail($wid,'offer');if($cust&&$cust['email']&&$from){$this->queueEmail($wid,$cust['email'],'Nabídka '.$num,'Dobrý den, zasíláme vám nabídku č. '.$num.'. Nabídku můžete otevřít a odpovědět na ni přes veřejný odkaz.',null,rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken);}}
+        $q=$this->db->prepare('SELECT * FROM customers WHERE id=? AND workspace_id=?');$q->execute([$cid,$wid]);$cust=$q->fetch();$from=$this->workspaceMail($wid,$type);
+        if($cust&&$cust['email']&&$from){
+            $dir=dirname(__DIR__,2).'/storage/mail';if(!is_dir($dir))@mkdir($dir,0775,true);
+            $doc=['doc_type'=>$type,'doc_number'=>$num,'variable_symbol'=>preg_replace('/\D/','',$num),'total_without_vat'=>$sub,'total_vat'=>$vatSum,'total_with_vat'=>$total,'issue_date'=>$_POST['issue_date']??date('Y-m-d'),'due_date'=>$_POST['due_date']??date('Y-m-d',strtotime('+14 days'))];
+            try{
+                $pdf=PdfService::invoice($doc,array_map(fn($it)=>['name'=>$it[0],'quantity'=>$it[1],'unit'=>$it[2],'unit_price'=>$it[3],'vat_rate'=>$it[4],'line_total'=>$it[5]],$items),$this->company(),$cust,$type==='invoice'?rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken.'/qr':null);
+                $file=$dir.'/'.$wid.'_'.$id.'.pdf';file_put_contents($file,$pdf);
+                [$subject,$body]=$this->documentMailTemplate($type,$num,$total,(string)$doc['due_date'],trim((string)($cust['company_name']??'')));
+                $this->queueEmail($wid,$cust['email'],$subject,$body,$file,rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken);
+            }catch(\Throwable $e){
+                [$subject,$body]=$this->documentMailTemplate($type,$num,$total,(string)$doc['due_date'],trim((string)($cust['company_name']??'')));
+                $this->queueEmail($wid,$cust['email'],$subject,$body,null,rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken);
+            }
+        }
         Response::redirect('/documents');
     }
     private function nextNumber(string $type):int{$s=$this->db->prepare('SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type=?');$s->execute([Auth::workspaceId(),$type]);return (int)$s->fetchColumn()+1;}
@@ -180,29 +192,41 @@ final class WebController {
     public function publicQr(string $token):void{
         $d=$this->publicDocumentByToken($token);
         if($d['doc_type']!=='invoice') Response::abort(422,'QR platba je dostupná pouze pro faktury.');
-        $spayd=QrService::spayd((string)$d['bank_account'],(float)$d['total_with_vat'],(string)$d['variable_symbol']);
-        if(!$spayd) Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
-        try{
-            $qr=QrService::png($spayd,520,14);
-            header('Content-Type: '.$qr['mime']);
-            header('Content-Disposition: '.(!empty($_GET['download'])?'attachment':'inline').'; filename="qr-'.preg_replace('/[^A-Za-z0-9._-]/','-',(string)$d['doc_number']).'.png"');
-            header('Cache-Control: public, max-age=3600');
-            echo $qr['bytes']; exit;
-        }catch(\Throwable $e){ Response::abort(500,'QR platbu se nepodařilo vygenerovat. Zkontrolujte nastavení serveru.'); }
+        $iban=$this->normalizeIban((string)$d['bank_account']);
+        if(!$iban) Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
+        $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
+        if(!class_exists('Endroid\QrCode\QrCode')) Response::abort(500,'QR knihovna není nainstalována.');
+        $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(520)->setMargin(14);$result=(new \Endroid\QrCode\Writer\PngWriter())->write($qr);
+        header('Content-Type: '.$result->getMimeType());header('Cache-Control: public, max-age=3600');echo $result->getString();exit;
     }
 
     public function publicPay(string $token):void{
         $d=$this->publicDocumentByToken($token);if($d['doc_type']!=='invoice')Response::abort(422,'Platba je dostupná pouze pro faktury.');if($d['status']==='cancelled')Response::abort(422,'Stornovanou fakturu nelze zaplatit.');
         if($d['payment_status']==='paid')Response::redirect('/d/'.$token);
         try{if(GoPayService::isConnected((int)$d['workspace_id'])){$this->createPublicGoPay($d,$token);return;}
-            $spayd=QrService::spayd((string)$d['bank_account'],(float)$d['total_with_vat'],(string)$d['variable_symbol']);if(!$spayd)Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
-            $qr=QrService::png($spayd,360,10);
-            header('Content-Type: '.$qr['mime']);header('Content-Disposition: inline; filename="qr-'.$d['doc_number'].'.png"');echo $qr['bytes'];exit;
+            $iban=$this->normalizeIban((string)$d['bank_account']);if(!$iban)Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
+            $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
+            if(!class_exists('Endroid\QrCode\QrCode'))Response::abort(500,'QR knihovna není nainstalována.');
+            $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(360)->setMargin(10);$result=(new \Endroid\QrCode\Writer\PngWriter())->write($qr);
+            header('Content-Type: '.$result->getMimeType());header('Content-Disposition: inline; filename="qr-'.$d['doc_number'].'.png"');echo $result->getString();exit;
         }catch(\Throwable $e){Response::abort(502,'Platbu se nepodařilo připravit: '.$e->getMessage());}
     }
     public function pdf(int $id):void{Auth::require();$s=$this->db->prepare('SELECT d.*,c.company_name,c.first_name,c.last_name,c.street,c.city,c.zip,c.ico,c.dic FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen');$s=$this->db->prepare('SELECT * FROM document_items WHERE document_id=?');$s->execute([$id]);$items=$s->fetchAll();$company=$this->company();$pdf=PdfService::invoice($d,$items,$company,$d,rtrim(Env::get('APP_URL',''),'/').'/d/'.$d['public_token'].'/qr');header('Content-Type: application/pdf');header('Content-Disposition: inline; filename="'.$d['doc_number'].'.pdf"');echo $pdf;exit;}
     private function queueEmail(int $wid,string $to,string $subject,string $body,?string $attachment=null,?string $actionUrl=null):void{$replyTo=$this->workspaceMailAddress($wid);$this->db->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,attachment_path,action_url,status,reply_to) VALUES(?,?,?,?,?,?,?,?)')->execute([$wid,$to,$subject,$body,$attachment,$actionUrl,'queued',$replyTo]);}
-    private function workspaceMail(int $wid,string $type):?string{ $s=$this->db->prepare('SELECT email_localpart,mail_enabled,mail_invoices,mail_reminders,mail_receipts,mail_offers FROM workspaces WHERE id=?');$s->execute([$wid]);$w=$s->fetch()?:[];if(empty($w['mail_enabled'])||empty($w['email_localpart']))return null;$flag=['invoice'=>'mail_invoices','reminder'=>'mail_reminders','receipt'=>'mail_receipts','offer'=>'mail_offers'][$type]??null;if($flag!==null&&!empty($w[$flag])){ $domain=$this->saasSettings()['mail_domain']??'';return trim((string)$w['email_localpart']).'@'.trim((string)$domain);}return null;}
+    private function workspaceMail(int $wid,string $type):?string{ $s=$this->db->prepare('SELECT email_localpart,mail_enabled,mail_invoices,mail_reminders,mail_receipts,mail_offers,mail_orders,mail_proformas,mail_credits FROM workspaces WHERE id=?');$s->execute([$wid]);$w=$s->fetch()?:[];if(empty($w['mail_enabled'])||empty($w['email_localpart']))return null;$flag=['invoice'=>'mail_invoices','reminder'=>'mail_reminders','receipt'=>'mail_receipts','offer'=>'mail_offers','order'=>'mail_orders','proforma'=>'mail_proformas','credit'=>'mail_credits'][$type]??null;if($flag!==null&&!empty($w[$flag])){ $domain=$this->saasSettings()['mail_domain']??'';return trim((string)$w['email_localpart']).'@'.trim((string)$domain);}return null;}
+    private function documentMailTemplate(string $type,string $number,float $total,string $dueDate, string $companyName=''):array{
+        $totalText=number_format($total,2,',',' ').' Kč';
+        $due=$dueDate?date('d.m.Y',strtotime($dueDate)):'neuvedeno';
+        $name=$companyName!==''?' pro '.$companyName:'';
+        $map=[
+          'invoice'=>['Faktura '.$number.' – '.$this->company()['name'],'v příloze Vám zasíláme fakturu č. '.$number.$name.'.\n\nCelková částka k úhradě: '.$totalText.'\nSplatnost: '.$due.'.\n\nFakturu můžete otevřít také online přes odkaz v tomto e-mailu. Pokud jste již úhradu provedli, považujte prosím tuto zprávu za bezpředmětnou.\n\nV případě dotazů nám jednoduše odpovězte na tento e-mail.'],
+          'proforma'=>['Zálohová faktura '.$number.' – '.$this->company()['name'],'v příloze Vám zasíláme zálohovou fakturu č. '.$number.$name.'.\n\nČástka zálohy: '.$totalText.'\nSplatnost: '.$due.'.\n\nDoklad můžete otevřít také online přes odkaz v tomto e-mailu.\n\nPokud budete mít k záloze jakýkoli dotaz, odpovězte prosím přímo na tento e-mail.'],
+          'offer'=>['Nabídka '.$number.' – '.$this->company()['name'],'v příloze Vám zasíláme nabídku č. '.$number.$name.'.\n\nNabídku si můžete otevřít online a přímo přes ni potvrdit nebo odmítnout její přijetí.\n\nPokud chcete nabídku upravit nebo máte dotazy, jednoduše nám odpovězte na tento e-mail.'],
+          'order'=>['Objednávka '.$number.' – '.$this->company()['name'],'v příloze Vám zasíláme objednávku č. '.$number.$name.'.\n\nDoklad můžete otevřít také online přes odkaz v tomto e-mailu.\n\nV případě dotazů nebo změn objednávky nám prosím odpovězte na tento e-mail.'],
+          'credit'=>['Dobropis '.$number.' – '.$this->company()['name'],'v příloze Vám zasíláme dobropis č. '.$number.$name.'.\n\nČástka dobropisu: '.$totalText.'.\n\nDoklad můžete otevřít také online přes odkaz v tomto e-mailu.\n\nPokud potřebujete cokoli upřesnit, odpovězte prosím přímo na tento e-mail.'],
+        ];
+        return $map[$type]??$map['invoice'];
+    }
     private function company():array{$s=$this->db->prepare('SELECT * FROM workspaces WHERE id=?');$s->execute([Auth::workspaceId()]);return $s->fetch()?:[];}
     public function jobs():void{Auth::require();$this->gate();$jobs=$this->scope('SELECT j.*,c.company_name FROM jobs j LEFT JOIN customers c ON c.id=j.customer_id WHERE j.workspace_id=? ORDER BY j.created_at DESC');View::render('jobs/index',['title'=>'Zakázky','jobs'=>$jobs]);}
     public function jobForm():void{Auth::require();View::render('jobs/form',['title'=>'Nová zakázka','customers'=>$this->customersList()]);}
@@ -260,8 +284,8 @@ final class WebController {
         $rawBank=trim((string)($_POST['bank_account']??''));
         $iban=$rawBank===''?null:$this->normalizeIban($rawBank);
         if($rawBank!=='' && !$iban) Response::abort(422,'Bankovní účet musí být platný IBAN (CZ...) nebo český účet ve formátu číslo/kód banky.');
-        $this->db->prepare('UPDATE workspaces SET name=?,email_localpart=?,mail_enabled=?,mail_invoices=?,mail_reminders=?,mail_receipts=?,mail_offers=?,weekly_report_enabled=?,monthly_report_enabled=?,ico=?,dic=?,street=?,city=?,zip=?,email=?,phone=?,bank_account=? WHERE id=?')->execute([
-            $_POST['name'],$local,isset($_POST['mail_enabled'])?1:0,isset($_POST['mail_invoices'])?1:0,isset($_POST['mail_reminders'])?1:0,isset($_POST['mail_receipts'])?1:0,isset($_POST['mail_offers'])?1:0,isset($_POST['weekly_report_enabled'])?1:0,isset($_POST['monthly_report_enabled'])?1:0,
+        $this->db->prepare('UPDATE workspaces SET name=?,email_localpart=?,mail_enabled=?,mail_invoices=?,mail_reminders=?,mail_receipts=?,mail_offers=?,mail_orders=?,mail_proformas=?,mail_credits=?,weekly_report_enabled=?,monthly_report_enabled=?,ico=?,dic=?,street=?,city=?,zip=?,email=?,phone=?,bank_account=? WHERE id=?')->execute([
+            $_POST['name'],$local,isset($_POST['mail_enabled'])?1:0,isset($_POST['mail_invoices'])?1:0,isset($_POST['mail_reminders'])?1:0,isset($_POST['mail_receipts'])?1:0,isset($_POST['mail_offers'])?1:0,isset($_POST['mail_orders'])?1:0,isset($_POST['mail_proformas'])?1:0,isset($_POST['mail_credits'])?1:0,isset($_POST['weekly_report_enabled'])?1:0,isset($_POST['monthly_report_enabled'])?1:0,
             $_POST['ico']??null,$_POST['dic']??null,$_POST['street']??null,$_POST['city']??null,$_POST['zip']??null,$_POST['email']??null,$_POST['phone']??null,$iban,Auth::workspaceId()
         ]);
         if(!empty($_FILES['logo']['tmp_name']) && is_uploaded_file($_FILES['logo']['tmp_name'])){
@@ -450,16 +474,13 @@ final class WebController {
         $s=$this->db->prepare('SELECT d.*,w.bank_account FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE d.id=? AND d.workspace_id=?');
         $s->execute([$id,Auth::workspaceId()]); $d=$s->fetch();
         if(!$d) Response::abort(404,'Doklad nenalezen.');
-        if(($d['doc_type']??'')!=='invoice') Response::abort(422,'QR platba je dostupná pouze pro faktury.');
-        $spayd=QrService::spayd((string)$d['bank_account'],(float)$d['total_with_vat'],(string)$d['variable_symbol']);
-        if(!$spayd) Response::abort(422,'Ve firmě není nastaven platný bankovní účet pro QR platbu.');
-        try{
-            $qr=QrService::png($spayd,520,14);
-            header('Content-Type: '.$qr['mime']);
-            header('Content-Disposition: '.(!empty($_GET['download'])?'attachment':'inline').'; filename="qr-'.preg_replace('/[^A-Za-z0-9._-]/','-',(string)$d['doc_number']).'.png"');
-            header('Cache-Control: private, max-age=3600');
-            echo $qr['bytes']; exit;
-        }catch(\Throwable $e){ Response::abort(500,'QR platbu se nepodařilo vygenerovat. Zkontrolujte serverovou instalaci.'); }
+        $iban=$this->normalizeIban((string)$d['bank_account']);
+        if(!$iban) Response::abort(422,'Ve firmě není nastaven platný IBAN ani český účet ve formátu číslo/kód banky.');
+        $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
+        if(!class_exists('Endroid\QrCode\QrCode')) Response::abort(500,'QR knihovna není nainstalována. Spusťte composer install.');
+        $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(360)->setMargin(10);
+        $writer=new \Endroid\QrCode\Writer\PngWriter(); $result=$writer->write($qr);
+        header('Content-Type: '.$result->getMimeType()); echo $result->getString(); exit;
     }
 
     public function goPayLink(int $id):void{

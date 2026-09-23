@@ -1,3 +1,17 @@
 /* R46: bank connection cards stack cleanly on small screens */
 .bank-connect-grid{grid-template-columns:1fr 1fr}
 @media (max-width:760px){.bank-connect-grid{grid-template-columns:1fr !important}.bank-connect-grid>.card{grid-column:auto !important}.customer-address-card{padding:16px}.customer-address-card .row{grid-template-columns:1fr}.customer-delivery-toggle{display:flex;align-items:center;gap:10px}}
+
+/* Invoice QR modal */
+.qr-modal{display:none;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;padding:20px}
+.qr-modal.is-open{display:flex}
+.qr-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.56);backdrop-filter:blur(4px)}
+.qr-modal-card{position:relative;width:min(430px,100%);background:#fff;border:1px solid #e4e9f1;border-radius:24px;box-shadow:0 24px 70px rgba(15,23,42,.28);padding:28px;text-align:center}
+.qr-modal-close{position:absolute;right:14px;top:12px;width:36px;height:36px;border:0;border-radius:50%;background:#f3f5f8;color:#344054;font-size:25px;line-height:1;cursor:pointer}
+.qr-modal-kicker{font-size:10px;letter-spacing:1.2px;font-weight:800;color:#667085;margin-top:4px}
+.qr-modal-card h2{margin:5px 0 2px;font-size:25px;color:#101828}
+.qr-modal-image-wrap{width:250px;height:250px;margin:20px auto 16px;border:1px solid #e4e9f1;border-radius:18px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.qr-modal-image-wrap img{display:block;width:220px;height:220px;image-rendering:auto}
+.qr-modal-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+.qr-modal-hint{margin-top:14px;font-size:11px;line-height:1.45;color:#98a2b3}
+@media(max-width:760px){.qr-modal{padding:14px}.qr-modal-card{padding:24px 18px;border-radius:20px}.qr-modal-image-wrap{width:230px;height:230px}.qr-modal-image-wrap img{width:205px;height:205px}.doc-actions .btn{margin-bottom:4px}}

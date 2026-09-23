@@ -2,7 +2,7 @@
 namespace App\Controllers;
 use PDO;
 use App\Core\{Auth,View,Response,Env};
-use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService};
+use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService,QrService};
 final class WebController {
     public function __construct(private PDO $db){}
     private function scope(string $sql,array $params=[]):array{$s=$this->db->prepare($sql);$s->execute([Auth::workspaceId(),...$params]);return $s->fetchAll();}
@@ -180,23 +180,24 @@ final class WebController {
     public function publicQr(string $token):void{
         $d=$this->publicDocumentByToken($token);
         if($d['doc_type']!=='invoice') Response::abort(422,'QR platba je dostupná pouze pro faktury.');
-        $iban=$this->normalizeIban((string)$d['bank_account']);
-        if(!$iban) Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
-        $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
-        if(!class_exists('Endroid\QrCode\QrCode')) Response::abort(500,'QR knihovna není nainstalována.');
-        $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(520)->setMargin(14);$result=(new \Endroid\QrCode\Writer\PngWriter())->write($qr);
-        header('Content-Type: '.$result->getMimeType());header('Cache-Control: public, max-age=3600');echo $result->getString();exit;
+        $spayd=QrService::spayd((string)$d['bank_account'],(float)$d['total_with_vat'],(string)$d['variable_symbol']);
+        if(!$spayd) Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
+        try{
+            $qr=QrService::png($spayd,520,14);
+            header('Content-Type: '.$qr['mime']);
+            header('Content-Disposition: '.(!empty($_GET['download'])?'attachment':'inline').'; filename="qr-'.preg_replace('/[^A-Za-z0-9._-]/','-',(string)$d['doc_number']).'.png"');
+            header('Cache-Control: public, max-age=3600');
+            echo $qr['bytes']; exit;
+        }catch(\Throwable $e){ Response::abort(500,'QR platbu se nepodařilo vygenerovat. Zkontrolujte nastavení serveru.'); }
     }
 
     public function publicPay(string $token):void{
         $d=$this->publicDocumentByToken($token);if($d['doc_type']!=='invoice')Response::abort(422,'Platba je dostupná pouze pro faktury.');if($d['status']==='cancelled')Response::abort(422,'Stornovanou fakturu nelze zaplatit.');
         if($d['payment_status']==='paid')Response::redirect('/d/'.$token);
         try{if(GoPayService::isConnected((int)$d['workspace_id'])){$this->createPublicGoPay($d,$token);return;}
-            $iban=$this->normalizeIban((string)$d['bank_account']);if(!$iban)Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
-            $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
-            if(!class_exists('Endroid\QrCode\QrCode'))Response::abort(500,'QR knihovna není nainstalována.');
-            $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(360)->setMargin(10);$result=(new \Endroid\QrCode\Writer\PngWriter())->write($qr);
-            header('Content-Type: '.$result->getMimeType());header('Content-Disposition: inline; filename="qr-'.$d['doc_number'].'.png"');echo $result->getString();exit;
+            $spayd=QrService::spayd((string)$d['bank_account'],(float)$d['total_with_vat'],(string)$d['variable_symbol']);if(!$spayd)Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
+            $qr=QrService::png($spayd,360,10);
+            header('Content-Type: '.$qr['mime']);header('Content-Disposition: inline; filename="qr-'.$d['doc_number'].'.png"');echo $qr['bytes'];exit;
         }catch(\Throwable $e){Response::abort(502,'Platbu se nepodařilo připravit: '.$e->getMessage());}
     }
     public function pdf(int $id):void{Auth::require();$s=$this->db->prepare('SELECT d.*,c.company_name,c.first_name,c.last_name,c.street,c.city,c.zip,c.ico,c.dic FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen');$s=$this->db->prepare('SELECT * FROM document_items WHERE document_id=?');$s->execute([$id]);$items=$s->fetchAll();$company=$this->company();$pdf=PdfService::invoice($d,$items,$company,$d,rtrim(Env::get('APP_URL',''),'/').'/d/'.$d['public_token'].'/qr');header('Content-Type: application/pdf');header('Content-Disposition: inline; filename="'.$d['doc_number'].'.pdf"');echo $pdf;exit;}
@@ -449,13 +450,16 @@ final class WebController {
         $s=$this->db->prepare('SELECT d.*,w.bank_account FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE d.id=? AND d.workspace_id=?');
         $s->execute([$id,Auth::workspaceId()]); $d=$s->fetch();
         if(!$d) Response::abort(404,'Doklad nenalezen.');
-        $iban=$this->normalizeIban((string)$d['bank_account']);
-        if(!$iban) Response::abort(422,'Ve firmě není nastaven platný IBAN ani český účet ve formátu číslo/kód banky.');
-        $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
-        if(!class_exists('Endroid\QrCode\QrCode')) Response::abort(500,'QR knihovna není nainstalována. Spusťte composer install.');
-        $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(360)->setMargin(10);
-        $writer=new \Endroid\QrCode\Writer\PngWriter(); $result=$writer->write($qr);
-        header('Content-Type: '.$result->getMimeType()); echo $result->getString(); exit;
+        if(($d['doc_type']??'')!=='invoice') Response::abort(422,'QR platba je dostupná pouze pro faktury.');
+        $spayd=QrService::spayd((string)$d['bank_account'],(float)$d['total_with_vat'],(string)$d['variable_symbol']);
+        if(!$spayd) Response::abort(422,'Ve firmě není nastaven platný bankovní účet pro QR platbu.');
+        try{
+            $qr=QrService::png($spayd,520,14);
+            header('Content-Type: '.$qr['mime']);
+            header('Content-Disposition: '.(!empty($_GET['download'])?'attachment':'inline').'; filename="qr-'.preg_replace('/[^A-Za-z0-9._-]/','-',(string)$d['doc_number']).'.png"');
+            header('Cache-Control: private, max-age=3600');
+            echo $qr['bytes']; exit;
+        }catch(\Throwable $e){ Response::abort(500,'QR platbu se nepodařilo vygenerovat. Zkontrolujte serverovou instalaci.'); }
     }
 
     public function goPayLink(int $id):void{

@@ -110,10 +110,12 @@ final class WebController {
                 $first=trim((string)($_POST['new_customer_first_name']??''));
                 $last=trim((string)($_POST['new_customer_last_name']??''));
                 if($company==='' && $first==='' && $last==='') Response::abort(422,'Vyplňte alespoň název nového zákazníka.');
-                $this->db->prepare('INSERT INTO customers(workspace_id,type,company_name,first_name,last_name,ico,dic,email,phone,active) VALUES(?,?,?,?,?,?,?,?,?,1)')->execute([
+                $this->db->prepare('INSERT INTO customers(workspace_id,type,company_name,first_name,last_name,ico,dic,street,city,zip,email,phone,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)')->execute([
                     $wid, $company!==''?'company':'person', $company?:null, $first?:null, $last?:null,
                     trim((string)($_POST['new_customer_ico']??''))?:null, trim((string)($_POST['new_customer_dic']??''))?:null,
-                    trim((string)($_POST['new_customer_email']??''))?:null, trim((string)($_POST['new_customer_phone']??''))?:null
+                    trim((string)($_POST['new_customer_street']??''))?:null, trim((string)($_POST['new_customer_city']??''))?:null,
+                    trim((string)($_POST['new_customer_zip']??''))?:null, trim((string)($_POST['new_customer_email']??''))?:null,
+                    trim((string)($_POST['new_customer_phone']??''))?:null
                 ]);
                 $cid=(int)$this->db->lastInsertId();
             }

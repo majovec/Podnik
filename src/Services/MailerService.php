@@ -22,16 +22,17 @@ final class MailerService {
         self::$lastError='';$token=trim((string)Env::get('POSTMARK_SERVER_TOKEN',''));
         if($token===''){self::$lastError='POSTMARK_SERVER_TOKEN není nastaven.';return false;}
         $from=$from?:Env::get('MAIL_FROM');if(!$from){self::$lastError='MAIL_FROM není nastaven.';return false;}$name=$name?:Env::get('MAIL_FROM_NAME','Byznio');
-        $payload=['From'=>$name.' <'.$from.'>','To'=>$to,'Subject'=>$subject,'TextBody'=>$body,'HtmlBody'=>$html,'MessageStream'=>Env::get('POSTMARK_MESSAGE_STREAM','outbound')];
+        $payload=['From'=>$name.' <'.$from.'>','To'=>$to,'Subject'=>$subject,'TextBody'=>$body,'HtmlBody'=>$html,'MessageStream'=>Env::get('POSTMARK_MESSAGE_STREAM','outbound')]; if(!empty($GLOBALS['_byznio_mail_reply_to'])){ $payload['ReplyTo']=$GLOBALS['_byznio_mail_reply_to']; unset($GLOBALS['_byznio_mail_reply_to']); }
         if($attachment){$file=@file_get_contents($attachment);if($file===false){self::$lastError='Přílohu se nepodařilo načíst.';return false;}$payload['Attachments']=[['Name'=>basename($attachment),'Content'=>base64_encode($file),'ContentType'=>'application/pdf']];}
         $ch=curl_init('https://api.postmarkapp.com/email');curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>['Accept: application/json','Content-Type: application/json','X-Postmark-Server-Token: '.$token],CURLOPT_POSTFIELDS=>json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),CURLOPT_CONNECTTIMEOUT=>10,CURLOPT_TIMEOUT=>30,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2]);
         $response=curl_exec($ch);$errno=curl_errno($ch);$error=curl_error($ch);$http=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);curl_close($ch);
         if($response===false){self::$lastError='Postmark cURL chyba '.$errno.': '.$error;return false;}if($http<200||$http>=300){$decoded=json_decode($response,true);self::$lastError='Postmark HTTP '.$http.': '.($decoded['Message']??$response);return false;}return true;
     }
-    public static function send(string $to,string $subject,string $body,?string $attachment=null,?string $from=null,?string $name=null,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null):bool{
+    public static function send(string $to,string $subject,string $body,?string $attachment=null,?string $from=null,?string $name=null,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null,?string $replyTo=null):bool{
+        if($replyTo){$GLOBALS['_byznio_mail_reply_to']=$replyTo;}
         return self::deliver($to,$subject,$body,self::html($body,$name?:Env::get('MAIL_FROM_NAME','Byznio'),$actionUrl,$logoPath,$workspaceId),$attachment,$from,$name);
     }
-    public static function sendReport(string $to,string $subject,string $body,string $reportHtml,?string $from=null,?string $name=null,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null):bool{
-        $name=$name?:Env::get('MAIL_FROM_NAME','Byznio');return self::deliver($to,$subject,$body,self::reportHtml($reportHtml,$name,$actionUrl,$logoPath,$workspaceId),null,$from,$name);
+    public static function sendReport(string $to,string $subject,string $body,string $reportHtml,?string $from=null,?string $name=null,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null,?string $replyTo=null):bool{
+        $name=$name?:Env::get('MAIL_FROM_NAME','Byznio');if($replyTo){$GLOBALS['_byznio_mail_reply_to']=$replyTo;}return self::deliver($to,$subject,$body,self::reportHtml($reportHtml,$name,$actionUrl,$logoPath,$workspaceId),null,$from,$name);
     }
 }

@@ -27,9 +27,9 @@ if(!$public && \App\Core\Auth::check()){
     }catch(\Throwable $e){ $niaBriefing=['Jsem připravená pomoct. Řekni mi, co dnes potřebuješ vyřešit.']; }
 }
 $companyLogoUrl=null; if(!empty($workspaceLayout['logo_path'])){ $logoToken=hash_hmac('sha256',(string)\App\Core\Auth::workspaceId(),(string)\App\Core\Env::get('APP_KEY','')); $companyLogoUrl='/mail/logo/'.(int)\App\Core\Auth::workspaceId().'?token='.$logoToken; }
-$navPermissions=['/documents'=>'invoicing','/jobs'=>'jobs','/expenses'=>'expenses','/products'=>'inventory','/bank'=>'bank','/calendar'=>'calendar','/tax'=>'tax','/tasks'=>'tasks','/ai'=>'ai','/recurring'=>'invoicing','/automation'=>'automation','/settings'=>'settings','/documents/files'=>'documents'];
+$navPermissions=['/communication'=>null,'/documents'=>'invoicing','/jobs'=>'jobs','/expenses'=>'expenses','/products'=>'inventory','/bank'=>'bank','/calendar'=>'calendar','/tax'=>'tax','/tasks'=>'tasks','/ai'=>'ai','/recurring'=>'invoicing','/automation'=>'automation','/settings'=>'settings','/documents/files'=>'documents'];
 $nav=[
- ['/','Přehled','home'], ['/customers','CRM','users'], ['/documents','Doklady','file'], ['/jobs','Zakázky','briefcase'],
+ ['/','Přehled','home'], ['/customers','CRM','users'], ['/communication','Komunikace','mail'], ['/documents','Doklady','file'], ['/jobs','Zakázky','briefcase'],
  ['/expenses','Výdaje','receipt'], ['/products','Sklad','box'], ['/bank','Banka','bank'], ['/calendar','Kalendář','calendar'],
  ['/recurring','Opakované','repeat'], ['/tax','Daně','percent'], ['/tasks','Úkoly','check'],
  ['/documents/files','Dokumenty','folder'], ['/reminders','Upomínky','bell'], ['/automation','Automatizace','workflow'],

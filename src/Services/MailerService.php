@@ -18,7 +18,8 @@ final class MailerService {
     public static function reportHtml(string $htmlBody,string $name,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null):string{
         return self::shell($htmlBody,$name,$actionUrl,$logoPath,$workspaceId);
     }
-    public static function lastError():string{return self::$lastError;}
+    public static function lastError():string{return self::$lastError;}    public static function htmlForLog(string $body,string $name,?string $actionUrl=null,?string $logoPath=null,?int $workspaceId=null):string{return self::html($body,$name,$actionUrl,$logoPath,$workspaceId);}
+
     private static function deliver(string $to,string $subject,string $body,string $html,?string $attachment,?string $from,?string $name):bool{
         self::$lastError='';$token=trim((string)Env::get('POSTMARK_SERVER_TOKEN',''));
         if($token===''){self::$lastError='POSTMARK_SERVER_TOKEN není nastaven.';return false;}

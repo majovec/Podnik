@@ -95,6 +95,61 @@ final class WebController {
     public function documentForm():void{Auth::require();View::render('documents/form',['title'=>'Nový doklad','customers'=>$this->customersList(),'products'=>$this->productsList()]);}
     private function workspaceMailAddress(int $wid):?string{ $s=$this->db->prepare('SELECT email_localpart,mail_enabled FROM workspaces WHERE id=?');$s->execute([$wid]);$w=$s->fetch()?:[];$domain=trim((string)($this->saasSettings()['mail_domain']??''));if(empty($w['mail_enabled'])||empty($w['email_localpart'])||$domain==='')return null;return trim((string)$w['email_localpart']).'@'.$domain;}
     private function productsList():array{$s=$this->db->prepare('SELECT * FROM products WHERE workspace_id=? AND active=1 ORDER BY name');$s->execute([Auth::workspaceId()]);return $s->fetchAll();}
+    private function documentEmailTemplate(array $d,array $customer,array $company,string $publicUrl):array{
+        $type=(string)($d['doc_type']??'invoice');
+        $label=['invoice'=>'fakturu','proforma'=>'zálohovou fakturu','offer'=>'nabídku','order'=>'objednávku','credit'=>'dobropis'][$type]??'doklad';
+        $subjectLabel=['invoice'=>'Faktura','proforma'=>'Zálohová faktura','offer'=>'Nabídka','order'=>'Objednávka','credit'=>'Dobropis'][$type]??'Doklad';
+        $number=(string)($d['doc_number']??'');
+        $amount=number_format((float)($d['total_with_vat']??0),2,',',' ').' Kč';
+        $due=!empty($d['due_date'])?date('d.m.Y',strtotime((string)$d['due_date'])):'';
+        $name=trim((string)($customer['company_name']??'')); if($name==='')$name=trim((string)($customer['first_name']??'').' '.(string)($customer['last_name']??''));
+        $lines=[];
+        $lines[]='Dobrý den'.($name!==''?' '.$name:'').',';
+        $lines[]='';
+        if($type==='invoice'){
+            $lines[]='v příloze Vám zasíláme fakturu č. '.$number.'.';
+            $lines[]='Celková částka k úhradě: '.$amount.'.';
+            if($due!=='')$lines[]='Splatnost: '.$due.'.';
+        } elseif($type==='proforma'){
+            $lines[]='v příloze Vám zasíláme zálohovou fakturu č. '.$number.'.';
+            $lines[]='Částka k úhradě: '.$amount.'.';
+            if($due!=='')$lines[]='Splatnost: '.$due.'.';
+        } elseif($type==='offer'){
+            $lines[]='v příloze Vám zasíláme nabídku č. '.$number.'.';
+            $lines[]='Nabídku můžete otevřít také online pomocí odkazu níže.';
+        } elseif($type==='order'){
+            $lines[]='v příloze Vám zasíláme objednávku č. '.$number.'.';
+            $lines[]='Objednávku můžete otevřít také online pomocí odkazu níže.';
+        } else {
+            $lines[]='v příloze Vám zasíláme dobropis č. '.$number.'.';
+            $lines[]='Dobropis můžete otevřít také online pomocí odkazu níže.';
+        }
+        $lines[]='';
+        $lines[]='Online doklad: '.$publicUrl;
+        $lines[]='';
+        $lines[]='S pozdravem,';
+        $lines[]=(string)($company['name']??'');
+        return ['subject'=>$subjectLabel.' č. '.$number.' – '.((string)($company['name']??'Byznio')), 'body'=>implode("\n",$lines), 'label'=>$label];
+    }
+    public function sendDocumentEmail(int $id):void{
+        Auth::require(); Auth::verifyCsrf(); $wid=Auth::workspaceId();
+        $s=$this->db->prepare('SELECT d.*,c.email,c.company_name,c.first_name,c.last_name,c.street,c.city,c.zip FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');$s->execute([$id,$wid]);$d=$s->fetch();
+        if(!$d)Response::abort(404,'Doklad nenalezen.');
+        $to=strtolower(trim((string)($d['email']??''))); if(!filter_var($to,FILTER_VALIDATE_EMAIL))Response::abort(422,'Zákazník nemá platný e-mail.');
+        $company=$this->company();$from=$this->workspaceMailAddress($wid); if(!$from)Response::abort(422,'Odesílání e-mailů pro tuto firmu zatím není aktivní.');
+        $publicUrl=rtrim(Env::get('APP_URL',''),'/').'/d/'.(string)$d['public_token'];
+        $tpl=$this->documentEmailTemplate($d,$d,$company,$publicUrl);
+        $subject=trim((string)($_POST['subject']??$tpl['subject']));$body=trim((string)($_POST['body']??$tpl['body']));
+        if($subject==='')$subject=$tpl['subject']; if($body==='')$body=$tpl['body'];
+        $itemsQ=$this->db->prepare('SELECT * FROM document_items WHERE document_id=? ORDER BY id');$itemsQ->execute([$id]);$items=$itemsQ->fetchAll();
+        $pdf=PdfService::invoice($d,$items,$company,$d,$d['doc_type']==='invoice'?$publicUrl.'/qr':null);
+        $dir=dirname(__DIR__,2).'/storage/mail';if(!is_dir($dir))@mkdir($dir,0775,true);$file=$dir.'/'.$wid.'_'.$id.'_'.date('YmdHis').'.pdf';file_put_contents($file,$pdf);
+        $replyTo=$from; $ok=MailerService::send($to,$subject,$body,$file,$from,(string)($company['name']??'Byznio'),$publicUrl,$company['logo_path']??null,$wid,$replyTo);
+        if(!$ok)Response::abort(502,'E-mail se nepodařilo odeslat: '.MailerService::lastError());
+        $this->db->prepare('INSERT INTO email_messages(workspace_id,customer_id,document_id,direction,from_email,to_email,subject,body,html_body) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$wid,$d['customer_id']?:null,$id,'outbound',$from,$to,$subject,$body,MailerService::htmlForLog($body,(string)($company['name']??'Byznio'),$publicUrl,$company['logo_path']??null,$wid)]);
+        Response::redirect('/documents?sent='.$id);
+    }
+
     public function documentCancel(int $id):void{Auth::require();Auth::verifyCsrf();$s=$this->db->prepare('SELECT * FROM documents WHERE id=? AND workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen.');if($d['payment_status']==='paid')Response::abort(422,'Zaplacený doklad nelze stornovat.');$this->db->prepare("UPDATE documents SET status='cancelled',payment_status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=?")->execute([$id,Auth::workspaceId()]);$this->audit('cancel','document',$id);Response::redirect('/documents');}
     public function offerStatus(int $id):void{Auth::require();Auth::verifyCsrf();$status=$_POST['status']??'pending';if(!in_array($status,['pending','accepted','rejected'],true))Response::abort(422,'Neplatný stav nabídky.');$this->db->prepare("UPDATE documents SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=? AND doc_type='offer'")->execute([$status,$id,Auth::workspaceId()]);$this->audit('offer_'.$status,'document',$id);Response::redirect('/documents');}
     public function inventoryCount():void{Auth::require();$this->gate();Auth::verifyCsrf();$pid=(int)$_POST['product_id'];$count=(float)$_POST['counted_stock'];$s=$this->db->prepare('SELECT * FROM products WHERE id=? AND workspace_id=?');$s->execute([$pid,Auth::workspaceId()]);$p=$s->fetch();if(!$p)Response::abort(404,'Produkt nenalezen.');$diff=$count-(float)$p['stock'];$this->db->beginTransaction();$this->db->prepare('UPDATE products SET stock=? WHERE id=? AND workspace_id=?')->execute([$count,$pid,Auth::workspaceId()]);$this->db->prepare('INSERT INTO inventory_counts(workspace_id,product_id,expected_stock,counted_stock,difference,note,created_by) VALUES(?,?,?,?,?,?,?)')->execute([Auth::workspaceId(),$pid,$p['stock'],$count,$diff,$_POST['note']??null,Auth::id()]);$this->db->commit();Response::redirect('/products');}

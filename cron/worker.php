@@ -48,15 +48,24 @@ $rules=$pdo->query("SELECT * FROM automation_rules WHERE active=1")->fetchAll();
 foreach($rules as $rule){
     try {
         $wid=(int)$rule['workspace_id']; $action=$rule['action_type']; $trigger=$rule['trigger_type'];
-        if($trigger==='stock_low' && $action==='create_task'){
-            $items=$pdo->prepare('SELECT id,name FROM products WHERE workspace_id=? AND active=1 AND stock<=min_stock');$items->execute([$wid]);
-            foreach($items as $item){$q=$pdo->prepare('SELECT COUNT(*) FROM tasks WHERE workspace_id=? AND title=? AND status="open"');$q->execute([$wid,'Doplnit sklad: '.$item['name']]);if(!(int)$q->fetchColumn())$pdo->prepare('INSERT INTO tasks(workspace_id,title,priority,status) VALUES(?,?,?,?)')->execute([$wid,'Doplnit sklad: '.$item['name'],'high','open']);}
-        }
-        if($trigger==='job_over_budget' && $action==='create_task'){
-            $jobs=$pdo->prepare('SELECT id,name FROM jobs WHERE workspace_id=? AND budget>0 AND actual_cost>budget AND status NOT IN ("done","cancelled")');$jobs->execute([$wid]);
-            foreach($jobs as $job){$title='Zakázka překročila rozpočet: '.$job['name'];$q=$pdo->prepare('SELECT COUNT(*) FROM tasks WHERE workspace_id=? AND title=? AND status="open"');$q->execute([$wid,$title]);if(!(int)$q->fetchColumn())$pdo->prepare('INSERT INTO tasks(workspace_id,title,priority,status,job_id) VALUES(?,?,?,?,?)')->execute([$wid,$title,'urgent','open',$job['id']]);}
-        }
-        $pdo->prepare('INSERT INTO automation_runs(workspace_id,rule_id,status,message) VALUES(?,?,?,?)')->execute([$wid,$rule['id'],'ok','Automatizace provedena']);
+        if($trigger==='payment_received' && $action==='match_payment'){
+            $tx=$pdo->prepare('SELECT id FROM bank_transactions WHERE workspace_id=? AND status IN ("unmatched","suggested") AND amount>0 ORDER BY id DESC LIMIT 100');$tx->execute([$wid]);$txRows=$tx->fetchAll();$matched=0;
+            foreach($txRows as $row){if(MatcherService::match($pdo,$wid,(int)$row['id']))$matched++;}
+            $message='Zkontrolováno '.count($txRows).' příchozích plateb; nově spárováno '.$matched.'.';
+        } elseif($trigger==='stock_low' && $action==='create_task'){
+            $items=$pdo->prepare('SELECT id,name FROM products WHERE workspace_id=? AND active=1 AND stock<=min_stock');$items->execute([$wid]);$created=0;
+            foreach($items as $item){$q=$pdo->prepare('SELECT COUNT(*) FROM tasks WHERE workspace_id=? AND title=? AND status="open"');$q->execute([$wid,'Doplnit sklad: '.$item['name']]);if(!(int)$q->fetchColumn()){$pdo->prepare('INSERT INTO tasks(workspace_id,title,priority,status) VALUES(?,?,?,?)')->execute([$wid,'Doplnit sklad: '.$item['name'],'high','open']);$created++;}}
+            $message='Nízká zásoba zkontrolována; vytvořeno '.$created.' úkolů.';
+        } elseif($trigger==='job_over_budget' && $action==='create_task'){
+            $jobs=$pdo->prepare('SELECT id,name FROM jobs WHERE workspace_id=? AND budget>0 AND actual_cost>budget AND status NOT IN ("done","cancelled")');$jobs->execute([$wid]);$created=0;
+            foreach($jobs as $job){$title='Zakázka překročila rozpočet: '.$job['name'];$q=$pdo->prepare('SELECT COUNT(*) FROM tasks WHERE workspace_id=? AND title=? AND status="open"');$q->execute([$wid,$title]);if(!(int)$q->fetchColumn()){$pdo->prepare('INSERT INTO tasks(workspace_id,title,priority,status,job_id) VALUES(?,?,?,?,?)')->execute([$wid,$title,'urgent','open',$job['id']]);$created++;}}
+            $message='Rozpočty zkontrolovány; vytvořeno '.$created.' úkolů.';
+        } elseif($trigger==='invoice_due' && $action==='send_reminder'){
+            $cfg=json_decode((string)$rule['config_json'],true)?:[];$days=(int)($cfg['days']??0);$docs=$pdo->prepare('SELECT d.*,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.workspace_id=? AND d.doc_type="invoice" AND d.payment_status!="paid" AND c.email IS NOT NULL AND d.due_date IS NOT NULL');$docs->execute([$wid]);$queued=0;
+            foreach($docs as $d){$diff=(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400);if(abs($diff)!==$days && !($days===0&&$diff===0))continue;$ded=$pdo->prepare('SELECT COUNT(*) FROM reminder_log WHERE workspace_id=? AND document_id=? AND days_offset=?');$ded->execute([$wid,$d['id'],$diff]);if((int)$ded->fetchColumn())continue;$pdo->prepare('INSERT INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)')->execute([$wid,$d['id'],$diff]);$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$wid,$d['email'],'Upomínka k faktuře '.$d['doc_number'],'Faktura '.$d['doc_number'].' je '.$diff.' dní po splatnosti.',rtrim(Env::get('APP_URL',''),'/').'/d/'.$d['public_token'],'queued']);$queued++;}
+            $message='Připraveno '.$queued.' upomínek.';
+        } else { $message='Pravidlo je uloženo; pro tuto kombinaci zatím není automatická akce implementována.'; }
+        $pdo->prepare('INSERT INTO automation_runs(workspace_id,rule_id,status,message) VALUES(?,?,?,?)')->execute([$wid,$rule['id'],'ok',$message]);
     } catch(Throwable $e){$pdo->prepare('INSERT INTO automation_runs(workspace_id,rule_id,status,message) VALUES(?,?,?,?)')->execute([(int)$rule['workspace_id'],$rule['id'],'error',$e->getMessage()]);}
 }
 

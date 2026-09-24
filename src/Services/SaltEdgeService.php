@@ -13,7 +13,7 @@ final class SaltEdgeService {
         $j=json_decode((string)$raw,true);if($raw===false||$code>=400)throw new \RuntimeException('Salt Edge HTTP '.$code.': '.(($j['error']['message']??null) ?: ($err ?: $raw)));return is_array($j)?$j:[];
     }
     public static function connectSession(string $customerId,string $returnTo,string $country='cz'):array{
-        return self::req('POST','/connections/connect',['customer_id'=>(string)$customerId,'country_code'=>strtoupper($country),'consent'=>['scopes'=>['accounts','transactions'],'from_date'=>date('Y-m-d',strtotime('-365 days'))],'attempt'=>['return_to'=>$returnTo]]);
+        return self::req('POST','/connections/connect',['customer_id'=>(string)$customerId,'consent'=>['scopes'=>['accounts','transactions'],'from_date'=>date('Y-m-d',strtotime('-365 days')),'return_to'=>$returnTo],'widget'=>['show_account_overview'=>true,'show_consent_confirmation'=>true,'credentials_strategy'=>'ask','template'=>'default_v3','theme'=>'light'],'return_connection_id'=>true,'return_error_class'=>true]);
     }
     public static function customer(string $identifier):array{return self::req('POST','/customers',['identifier'=>$identifier]);}
     public static function connections(string $customerId):array{return self::req('GET','/connections?customer_id='.rawurlencode($customerId));}

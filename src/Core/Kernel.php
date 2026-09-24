@@ -19,6 +19,7 @@ final class Kernel {
         $r->get('/crm',fn()=> $w->customers());
         $r->get('/login',fn()=> $w->login()); $r->post('/login',fn()=> $w->loginPost());
         $r->get('/register',fn()=> $w->register()); $r->post('/register',fn()=> $w->registerPost());
+        $r->get('/verify-email',fn()=> $w->verifyEmail()); $r->post('/verify-email/resend',fn()=> $w->resendVerification());
         $r->post('/logout',fn()=> $w->logout());
         $r->get('/uvod',fn()=> $w->onboarding()); $r->post('/uvod/ares',fn()=> $w->onboardingAres()); $r->post('/uvod/company',fn()=> $w->onboardingCompany()); $r->post('/uvod/complete',fn()=> $w->onboardingComplete()); $r->post('/uvod/skip',fn()=> $w->onboardingSkip());
         $r->get('/communication',fn()=> $w->communication()); $r->post('/customers/ares',fn()=> $w->customerAres()); $r->post('/webhooks/postmark/inbound/{secret}',fn($secret)=>$w->postmarkInbound((string)$secret)); $r->get('/customers',fn()=> $w->customers()); $r->get('/customers/new',fn()=> $w->customerForm()); $r->post('/customers/save',fn()=> $w->customerSave());

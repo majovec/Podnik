@@ -46,7 +46,7 @@ Projekt byl staticky projit proti všem 29 bodům původního zadání. Součás
 | Exporty | Hotovo | CSV, ISDOC, GDPR export |
 | AI asistent | Částečně hotovo | Kontext firmy je rozšířen; bezpečné potvrzované akce jsou implementované pro zákazníka a fakturu, další akce lze dál rozšiřovat |
 | Automatizace | Hotovo / pravidlové | Platby, nízký sklad, překročení rozpočtu, úkoly a worker |
-| SaaS | Hotovo | Workspace, trial, subscription, Stripe, role, audit, tenant scoping |
+| SaaS | Hotovo | Workspace, trial, subscription, GoPay, role, audit, tenant scoping |
 | Tarify | Zjednodušené | Aktuální produkt používá jednotný tarif 300 Kč/měsíc; konfigurace je v administraci |
 | Mobil | Hotovo | Responzivní shell, mobilní menu, mobilní landing, Nia |
 | Design | Hotovo / průběžně rozšiřitelný | Vizuální směr je sjednocen s dodanou vizualizací |

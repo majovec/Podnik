@@ -7,4 +7,4 @@
 - Neověřený účet se nemůže přihlásit.
 - Po úspěšném potvrzení e-mailu se uživatel přihlásí a pokračuje do Byznio onboardingu.
 - Stávající účty bez hodnoty `email_verified_at` jsou migrací ponechány jako neověřené; před ostrým přechodem je potřeba rozhodnout, zda je jednorázově označit jako ověřené, nebo je nechat potvrdit e-mail.
-- `.env.example` zůstává připravený pro finální produkční konfiguraci: doména, APP_URL, APP_KEY, Postmark, AI/Gemini, Salt Edge, Stripe a GoPay.
+- `.env.example` zůstává připravený pro finální produkční konfiguraci: doména, APP_URL, APP_KEY, Postmark, AI/Gemini, Salt Edge, GoPay.

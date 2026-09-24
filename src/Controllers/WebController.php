@@ -452,7 +452,17 @@ final class WebController {
         Auth::requireRole(['owner','admin']); Auth::verifyCsrf();
         $interval=$_POST['interval']??'month'; if(!in_array($interval,['month','year'],true))Response::abort(422,'Neplatné období předplatného.');
         $settings=$this->saasSettings(); $price=$interval==='year'?(float)$settings['yearly_price_czk']:(float)$settings['monthly_price_czk'];
-        try{$url=\App\Services\StripeService::checkout(Auth::workspaceId(),$interval.':'.$price,rtrim(Env::get('APP_URL',''),'/').'/admin/plans?success=1',rtrim(Env::get('APP_URL',''),'/').'/admin/plans?cancel=1');if(!$url)Response::abort(503,'Stripe není nakonfigurován.');Response::redirect($url);}catch(\Throwable $e){Response::abort(502,'Platbu se nepodařilo připravit: '.$e->getMessage());}
+        $wid=Auth::workspaceId();
+        $email=(string)($this->db->query('SELECT email FROM workspaces WHERE id='.(int)$wid)->fetchColumn()?:'');
+        try{
+            $order='BYZNIO-'.$wid.'-'.date('YmdHis').'-'.bin2hex(random_bytes(3));
+            $base=rtrim(Env::get('APP_URL',''),'/'); if($base==='')Response::abort(503,'APP_URL není nastaven.');
+            $payment=GoPayService::createSaasSubscription($order,$price,$interval,$base.'/gopay/subscription/callback',$base.'/gopay/subscription/webhook',$email);
+            $pid=(int)($payment['id']??0); $url=GoPayService::gatewayUrl($payment);
+            if($pid<1||!$url)Response::abort(502,'GoPay nevrátil platební URL.');
+            $this->db->prepare('UPDATE subscriptions SET status="pending_payment",plan="all",billing_interval=?,gopay_subscription_payment_id=?,cancel_at_period_end=0,updated_at=CURRENT_TIMESTAMP WHERE workspace_id=?')->execute([$interval,$pid,$wid]);
+            Response::redirect($url);
+        }catch(\Throwable $e){Response::abort(502,'GoPay předplatné se nepodařilo připravit: '.$e->getMessage());}
     }
     public function bankSaltEdgeCallback():void{
         Auth::require();
@@ -544,18 +554,48 @@ final class WebController {
     public function adminSystem():void{Auth::require();if(!$this->isSuperAdmin())Response::abort(403,'Pouze Super Admin.');$s=$this->db->query('SELECT last_automatic_backup_at FROM saas_settings WHERE id=1')->fetch();View::render('admin/system',['title'=>'SaaS systém','last_automatic_backup_at'=>$s['last_automatic_backup_at']??null]);}
     public function adminPlans():void{Auth::requireRole(['owner','admin']);$sub=$this->db->prepare('SELECT * FROM subscriptions WHERE workspace_id=?');$sub->execute([Auth::workspaceId()]);View::render('admin/plans',['title'=>'Předplatné','subscription'=>$sub->fetch(),'settings'=>$this->saasSettings(),'superAdmin'=>$this->isSuperAdmin()]);}
     public function subscriptionCancel():void{
-        Auth::requireRole(['owner','admin']);Auth::verifyCsrf();$s=$this->db->prepare('SELECT stripe_subscription_id,status FROM subscriptions WHERE workspace_id=?');$s->execute([Auth::workspaceId()]);$sub=$s->fetch()?:[];
-        if(empty($sub['stripe_subscription_id']))Response::abort(422,'Aktivní Stripe předplatné nebylo nalezeno.');
-        try{StripeService::cancelAtPeriodEnd((string)$sub['stripe_subscription_id']);$this->db->prepare('UPDATE subscriptions SET cancel_at_period_end=1,updated_at=CURRENT_TIMESTAMP WHERE workspace_id=?')->execute([Auth::workspaceId()]);}catch(\Throwable $e){Response::abort(502,'Předplatné se nepodařilo naplánovat ke zrušení: '.$e->getMessage());}Response::redirect('/admin/plans');
+        Auth::requireRole(['owner','admin']);Auth::verifyCsrf();$s=$this->db->prepare('SELECT gopay_subscription_payment_id,status,cancel_at_period_end FROM subscriptions WHERE workspace_id=?');$s->execute([Auth::workspaceId()]);$sub=$s->fetch()?:[];
+        $parent=(int)($sub['gopay_subscription_payment_id']??0);
+        if($parent<1)Response::abort(422,'Aktivní GoPay předplatné nebylo nalezeno.');
+        if(!empty($sub['cancel_at_period_end']))Response::redirect('/admin/plans');
+        try{GoPayService::voidSaasRecurrence($parent);$this->db->prepare('UPDATE subscriptions SET cancel_at_period_end=1,updated_at=CURRENT_TIMESTAMP WHERE workspace_id=?')->execute([Auth::workspaceId()]);}catch(\Throwable $e){Response::abort(502,'Předplatné se nepodařilo zrušit: '.$e->getMessage());}Response::redirect('/admin/plans');
     }
-    public function billingPortal():void{
-        Auth::requireRole(['owner','admin']);$url=StripeService::billingPortal(Auth::workspaceId(),rtrim(Env::get('APP_URL',''),'/').'/admin/plans');if(!$url)Response::abort(422,'Stripe zákaznický portál není dostupný, protože firma ještě nemá Stripe zákazníka.');Response::redirect($url);
+    public function billingPortal():void{Response::redirect('/admin/plans');}
+
+    public function goPaySubscriptionCallback():void{
+        $id=(int)($_GET['id']??0);
+        if($id>0){try{$this->processGoPaySubscriptionPayment($id);}catch(\Throwable $e){}}
+        Response::redirect('/admin/plans');
+    }
+    public function goPaySubscriptionWebhook():void{
+        $raw=(string)file_get_contents('php://input');$j=json_decode($raw,true)?:[];
+        $id=(int)($_GET['id']??$_POST['id']??($j['id']??($j['payment']['id']??0)));
+        if($id<1){http_response_code(400);echo 'missing payment id';return;}
+        try{$ok=$this->processGoPaySubscriptionPayment($id);http_response_code($ok?200:202);echo $ok?'ok':'pending';}catch(\Throwable $e){http_response_code(500);echo 'error';}
+    }
+    private function processGoPaySubscriptionPayment(int $id):bool{
+        $p=GoPayService::getSaasPayment($id);$state=(string)($p['state']??'');$parent=(int)($p['parent_id']??0);
+        $q=$this->db->prepare('SELECT * FROM subscriptions WHERE gopay_subscription_payment_id=? LIMIT 1');$q->execute([$parent>0?$parent:$id]);$sub=$q->fetch();
+        if(!$sub)return false;
+        $wid=(int)$sub['workspace_id'];
+        $this->db->prepare('INSERT OR IGNORE INTO gopay_subscription_payments(payment_id,workspace_id,parent_payment_id,state,amount,created_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)')->execute([$id,$wid,$parent?:null,$state,(float)($p['amount']??0)/100]);
+        if(!in_array($state,['PAID','AUTHORIZED'],true))return false;
+        $check=$this->db->prepare('SELECT COUNT(*) FROM gopay_subscription_payments WHERE payment_id=? AND paid_at IS NOT NULL');$check->execute([$id]);
+        if((int)$check->fetchColumn()>0)return true;
+        $interval=in_array($sub['billing_interval'],['month','year'],true)?$sub['billing_interval']:'month';
+        $base=new \DateTimeImmutable('now',new \DateTimeZone('Europe/Prague'));
+        if(!empty($sub['current_period_end'])){try{$candidate=new \DateTimeImmutable($sub['current_period_end'],new \DateTimeZone('Europe/Prague'));if($candidate>$base)$base=$candidate;}catch(\Throwable $e){}}
+        $end=$interval==='year'?$base->modify('+1 year'):$base->modify('+1 month');
+        $this->db->prepare('UPDATE gopay_subscription_payments SET state=?,paid_at=CURRENT_TIMESTAMP WHERE payment_id=?')->execute([$state,$id]);
+        $this->db->prepare('UPDATE subscriptions SET status="active",plan="all",current_period_end=?,cancel_at_period_end=0,updated_at=CURRENT_TIMESTAMP WHERE workspace_id=?')->execute([$end->format('Y-m-d H:i:s'),$wid]);
+        $this->db->prepare('UPDATE workspaces SET plan="all",status="active" WHERE id=?')->execute([$wid]);
+        return true;
     }
 
     public function saasBillingSave():void{Auth::require();if(!$this->isSuperAdmin())Response::abort(403,'Pouze Super Admin.');Auth::verifyCsrf();$m=max(1,(float)str_replace(',','.',$_POST['monthly_price_czk']??300));$y=max(1,(float)str_replace(',','.',$_POST['yearly_price_czk']??3240));$t=max(0,(int)($_POST['trial_days']??14));$d=preg_replace('/[^a-z0-9.-]/i','',strtolower(trim($_POST['mail_domain']??'nasystem.cz')));if(!$d)Response::abort(422,'Neplatná mailová doména.');$this->db->prepare('UPDATE saas_settings SET monthly_price_czk=?,yearly_price_czk=?,trial_days=?,mail_domain=?,updated_at=CURRENT_TIMESTAMP WHERE id=1')->execute([$m,$y,$t,$d]);Response::redirect('/admin/plans');}
     public function grantFree():void{Auth::require();if(!$this->isSuperAdmin())Response::abort(403,'Pouze Super Admin.');Auth::verifyCsrf();$wid=(int)$_POST['workspace_id'];$until=$_POST['free_until']??'';if(!$until)Response::abort(422,'Zadejte datum.');$this->db->prepare('UPDATE subscriptions SET status="free",plan="all",free_until=?,updated_at=CURRENT_TIMESTAMP WHERE workspace_id=?')->execute([$until.' 23:59:59',$wid]);$this->db->prepare('UPDATE workspaces SET plan="all",status="active" WHERE id=?')->execute([$wid]);Response::redirect('/admin/billing');}
     public function adminBilling():void{Auth::require();if(!$this->isSuperAdmin())Response::abort(403,'Pouze Super Admin.');$rows=$this->db->query('SELECT w.id,w.name,w.email_localpart,s.status,s.billing_interval,s.current_period_end,s.free_until FROM workspaces w LEFT JOIN subscriptions s ON s.workspace_id=w.id ORDER BY w.id DESC')->fetchAll();View::render('admin/billing',['title'=>'SaaS předplatné','settings'=>$this->saasSettings(),'workspaces'=>$rows]);}
-    public function setPlan():void{Auth::requireRole(['owner','admin']);Auth::verifyCsrf();Response::abort(410,'Ruční změna tarifu je zakázána. Tarif se mění pouze přes Stripe předplatné.');}
+    public function setPlan():void{Auth::requireRole(['owner','admin']);Auth::verifyCsrf();Response::abort(410,'Ruční změna tarifu je zakázána. Tarif se mění pouze přes aktivní GoPay předplatné.');}
     private function normalizeIban(string $value):?string{
         $v=strtoupper(preg_replace('/\s+/', '', trim($value)));
         if($v==='') return null;

@@ -32,6 +32,7 @@ final class Kernel {
         $r->get('/expenses',fn()=> $w->expenses()); $r->post('/expenses/save',fn()=> $w->expenseSave());
         $r->get('/products',fn()=> $w->products()); $r->post('/products/save',fn()=> $w->productSave()); $r->post('/products/move',fn()=> $w->stockMove());
         $r->post('/products/inventory-count',fn()=> $w->inventoryCount()); $r->get('/products/{id}/edit',fn($id)=>$w->productEdit((int)$id)); $r->post('/products/{id}/update',fn($id)=>$w->productUpdate((int)$id));
+        $r->get('/gopay/subscription/callback',fn()=> $w->goPaySubscriptionCallback()); $r->get('/gopay/subscription/webhook',fn()=> $w->goPaySubscriptionWebhook()); $r->post('/gopay/subscription/webhook',fn()=> $w->goPaySubscriptionWebhook());
         $r->get('/bank',fn()=> $w->bank()); $r->post('/bank/gopay/{id}',fn($id)=>$w->goPayLink((int)$id)); $r->get('/gopay/callback',fn()=> $w->goPayCallback()); $r->post('/gopay/webhook',fn()=> $w->goPayWebhook()); $r->post('/bank/import',fn()=> $w->bankImport()); $r->post('/bank/match/{id}',fn($id)=>$w->bankMatch((int)$id)); $r->get('/bank/accounts',fn()=> $w->bankSettings()); $r->post('/bank/accounts',fn()=> $w->bankConnect()); $r->post('/bank/accounts/{id}/sync',fn($id)=>$w->bankSync((int)$id));
         $r->post('/bank/saltedge/connect',fn()=> $w->bankSaltEdgeStart());
         $r->get('/bank/saltedge/callback',fn()=> $w->bankSaltEdgeCallback());
@@ -47,7 +48,6 @@ final class Kernel {
         $r->get('/api/v1/documents',fn()=>ApiController::documents()); $r->post('/api/v1/documents',fn()=>ApiController::documentCreate()); $r->put('/api/v1/documents/{id}',fn($id)=>ApiController::documentUpdate((int)$id)); $r->delete('/api/v1/documents/{id}',fn($id)=>ApiController::documentDelete((int)$id));
         $r->get('/api/v1/jobs',fn()=>ApiController::jobs()); $r->get('/api/v1/bank/transactions',fn()=>ApiController::transactions());
         $r->get('/api/v1/products',fn()=>ApiController::products()); $r->post('/api/v1/ai/ask',fn()=>ApiController::aiAsk()); $r->post('/api/v1/keys',fn()=>ApiController::apiKeyCreate());
-        $r->post('/billing/stripe/webhook',function(){ $payload=file_get_contents('php://input'); \App\Services\StripeService::webhook($payload,$_SERVER['HTTP_STRIPE_SIGNATURE']??''); http_response_code(200); echo 'ok'; });
         $r->dispatch($_SERVER['REQUEST_METHOD'],$_SERVER['REQUEST_URI']);
     }
 }

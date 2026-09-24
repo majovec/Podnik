@@ -28,6 +28,7 @@ final class Database {
         $eq=self::$pdo->query("PRAGMA table_info(email_queue)")->fetchAll();$en=array_column($eq,'name');if(!in_array('reply_to',$en,true))self::$pdo->exec("ALTER TABLE email_queue ADD COLUMN reply_to TEXT");
         self::$pdo->exec("CREATE TABLE IF NOT EXISTS gopay_accounts(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id INTEGER NOT NULL UNIQUE,goid_encrypted TEXT NOT NULL,client_id_encrypted TEXT NOT NULL,client_secret_encrypted TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE)");
         $dc=self::$pdo->query("PRAGMA table_info(documents)")->fetchAll();$dn=array_column($dc,'name');if(!in_array('gopay_payment_id',$dn,true))self::$pdo->exec("ALTER TABLE documents ADD COLUMN gopay_payment_id INTEGER");
+        if(!in_array('payment_method',$dn,true))self::$pdo->exec("ALTER TABLE documents ADD COLUMN payment_method TEXT DEFAULT 'bank_transfer'");
         if(!in_array('public_token',$dn,true))self::$pdo->exec("ALTER TABLE documents ADD COLUMN public_token TEXT");
         $existing=self::$pdo->query("SELECT id FROM documents WHERE public_token IS NULL OR public_token=''")->fetchAll();
         $fill=self::$pdo->prepare('UPDATE documents SET public_token=? WHERE id=?');

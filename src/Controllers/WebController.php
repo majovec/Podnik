@@ -89,6 +89,16 @@ final class WebController {
     public function onboardingSkip():void{Auth::require();Auth::verifyCsrf();$this->db->prepare('UPDATE workspaces SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([Auth::workspaceId()]);unset($_SESSION['byznio_new_registration']);Response::redirect('/');}
     public function customers():void{Auth::require();$q=trim($_GET['q']??'');$sql='SELECT * FROM customers WHERE workspace_id=? AND active=1';$p=[Auth::workspaceId()];if($q){$sql.=' AND (company_name LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR ico LIKE ?)';$l="%$q%";array_push($p,$l,$l,$l,$l);}$sql.=' ORDER BY company_name,last_name';$s=$this->db->prepare($sql);$s->execute($p);View::render('customers/index',['title'=>'Zákazníci','customers'=>$s->fetchAll(),'q'=>$q]);}
     public function customerForm():void{Auth::require();View::render('customers/form',['title'=>'Nový zákazník','customer'=>[]]);}
+    public function customerAres():void{
+        Auth::require(); Auth::verifyCsrf();
+        $ico=preg_replace('/\D/','',(string)($_POST['ico']??''));
+        if(strlen($ico)!==8) Response::json(['ok'=>false,'error'=>'IČO musí mít 8 číslic.'],422);
+        try{
+            $data=AresService::lookup($ico);
+            if(!$data) Response::json(['ok'=>false,'error'=>'Firma podle tohoto IČO nebyla v ARES nalezena.'],404);
+            Response::json(['ok'=>true,'data'=>$data]);
+        }catch(\Throwable $e){ Response::json(['ok'=>false,'error'=>'ARES je momentálně nedostupný. Zkus to prosím za chvíli.'],502); }
+    }
     public function customerSave():void{Auth::require();Auth::verifyCsrf();$d=$_POST;if(!empty($d['ico']) && !empty($_POST['ares'])){$a=AresService::lookup($d['ico']);if($a)$d=array_merge($d,$a);} $s=$this->db->prepare('INSERT INTO customers(workspace_id,type,company_name,first_name,last_name,ico,dic,street,city,zip,delivery_street,delivery_city,delivery_zip,email,phone,web,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');$s->execute([Auth::workspaceId(),$d['type']??'company',$d['company_name']??null,$d['first_name']??null,$d['last_name']??null,$d['ico']??null,$d['dic']??null,$d['street']??null,$d['city']??null,$d['zip']??null,$d['delivery_street']??null,$d['delivery_city']??null,$d['delivery_zip']??null,$d['email']??null,$d['phone']??null,$d['web']??null,$d['note']??null]);$id=(int)$this->db->lastInsertId();$this->audit('create','customer',$id,$d);Response::redirect('/customers');}
     private function customersList():array{$s=$this->db->prepare('SELECT id,company_name,first_name,last_name FROM customers WHERE workspace_id=? AND active=1 ORDER BY company_name,last_name');$s->execute([Auth::workspaceId()]);return $s->fetchAll();}
     public function documents():void{Auth::require();$type=$_GET['type']??'';$q=trim($_GET['q']??'');$sql='SELECT d.*,c.company_name,c.first_name,c.last_name FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.workspace_id=?';$p=[Auth::workspaceId()];if($type){$sql.=' AND d.doc_type=?';$p[]=$type;}if($q){$sql.=' AND (d.doc_number LIKE ? OR c.company_name LIKE ? OR c.last_name LIKE ?)';$l="%$q%";array_push($p,$l,$l,$l);}$sql.=' ORDER BY d.issue_date DESC,d.id DESC';$s=$this->db->prepare($sql);$s->execute($p);View::render('documents/index',['title'=>'Doklady','documents'=>$s->fetchAll(),'type'=>$type]);}
@@ -165,13 +175,17 @@ final class WebController {
                 $company=trim((string)($_POST['new_customer_company']??''));
                 $first=trim((string)($_POST['new_customer_first_name']??''));
                 $last=trim((string)($_POST['new_customer_last_name']??''));
+                $newIco=preg_replace('/\D/','',(string)($_POST['new_customer_ico']??''));
+                $newDic=trim((string)($_POST['new_customer_dic']??''));
+                $newStreet=trim((string)($_POST['new_customer_street']??''));
+                $newCity=trim((string)($_POST['new_customer_city']??''));
+                $newZip=trim((string)($_POST['new_customer_zip']??''));
+                if(!empty($_POST['new_customer_ares']) && strlen($newIco)===8){ try{$a=AresService::lookup($newIco);if($a){$company=$a['company_name']??$company;$newDic=$a['dic']??$newDic;$newStreet=$a['street']??$newStreet;$newCity=$a['city']??$newCity;$newZip=$a['zip']??$newZip;}}catch(\Throwable $e){} }
                 if($company==='' && $first==='' && $last==='') Response::abort(422,'Vyplňte alespoň název nového zákazníka.');
                 $this->db->prepare('INSERT INTO customers(workspace_id,type,company_name,first_name,last_name,ico,dic,street,city,zip,email,phone,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)')->execute([
                     $wid, $company!==''?'company':'person', $company?:null, $first?:null, $last?:null,
-                    trim((string)($_POST['new_customer_ico']??''))?:null, trim((string)($_POST['new_customer_dic']??''))?:null,
-                    trim((string)($_POST['new_customer_street']??''))?:null, trim((string)($_POST['new_customer_city']??''))?:null,
-                    trim((string)($_POST['new_customer_zip']??''))?:null, trim((string)($_POST['new_customer_email']??''))?:null,
-                    trim((string)($_POST['new_customer_phone']??''))?:null
+                    $newIco?:null, $newDic?:null, $newStreet?:null, $newCity?:null, $newZip?:null,
+                    trim((string)($_POST['new_customer_email']??''))?:null, trim((string)($_POST['new_customer_phone']??''))?:null
                 ]);
                 $cid=(int)$this->db->lastInsertId();
             }
@@ -186,18 +200,23 @@ final class WebController {
                 $items[]=[$name,$q,$_POST['item_unit'][$i]??'ks',$price,$vr,$line];
             }
             $total=round($sub+$vatSum,2); $num=DocumentService::nextNumber($this->db,$wid,$type); $publicToken=DocumentService::publicToken($this->db);
-            $s=$this->db->prepare('INSERT INTO documents(workspace_id,doc_type,doc_number,variable_symbol,customer_id,status,payment_status,issue_date,due_date,total_without_vat,total_vat,total_with_vat,created_by,public_token) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
-            $s->execute([$wid,$type,$num,preg_replace('/\D/','',$num),$cid,($type==='offer'?'pending':'issued'),'unpaid',$_POST['issue_date']??date('Y-m-d'),$_POST['due_date']??date('Y-m-d',strtotime('+14 days')),$sub,$vatSum,$total,Auth::id(),$publicToken]);
+            $paymentMethod=$_POST['payment_method']??'bank_transfer';
+            if(!in_array($paymentMethod,['bank_transfer','cash','card','gopay'],true))$paymentMethod='bank_transfer';
+            $paidNow=!empty($_POST['paid_now']) && in_array($type,['invoice','proforma'],true);
+            $paymentStatus=$paidNow?'paid':'unpaid';
+            $s=$this->db->prepare('INSERT INTO documents(workspace_id,doc_type,doc_number,variable_symbol,customer_id,status,payment_status,issue_date,due_date,payment_method,total_without_vat,total_vat,total_with_vat,created_by,public_token) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            $s->execute([$wid,$type,$num,preg_replace('/\D/','',$num),$cid,($type==='offer'?'pending':'issued'),$paymentStatus,$_POST['issue_date']??date('Y-m-d'),$_POST['due_date']??date('Y-m-d',strtotime('+14 days')),$paymentMethod,$sub,$vatSum,$total,Auth::id(),$publicToken]);
             $id=(int)$this->db->lastInsertId();
             $iStmt=$this->db->prepare('INSERT INTO document_items(document_id,name,quantity,unit,unit_price,vat_rate,line_total) VALUES(?,?,?,?,?,?,?)');
             foreach($items as $it) $iStmt->execute([$id,...$it]);
+            if($paidNow){$this->db->prepare('INSERT INTO payments(workspace_id,document_id,amount,paid_at,method,source) VALUES(?,?,?,?,?,?)')->execute([$wid,$id,$total,date('Y-m-d'),$paymentMethod,'manual']);}
             $this->db->commit();
         } catch(\Throwable $e) { if($this->db->inTransaction()) $this->db->rollBack(); throw $e; }
 
         $q=$this->db->prepare('SELECT * FROM customers WHERE id=? AND workspace_id=?');$q->execute([$cid,$wid]);$cust=$q->fetch();$from=$this->workspaceMail($wid,$type);
         if($cust&&$cust['email']&&$from){
             $dir=dirname(__DIR__,2).'/storage/mail';if(!is_dir($dir))@mkdir($dir,0775,true);
-            $doc=['doc_type'=>$type,'doc_number'=>$num,'variable_symbol'=>preg_replace('/\D/','',$num),'total_without_vat'=>$sub,'total_vat'=>$vatSum,'total_with_vat'=>$total,'issue_date'=>$_POST['issue_date']??date('Y-m-d'),'due_date'=>$_POST['due_date']??date('Y-m-d',strtotime('+14 days'))];
+            $doc=['doc_type'=>$type,'doc_number'=>$num,'variable_symbol'=>preg_replace('/\D/','',$num),'total_without_vat'=>$sub,'total_vat'=>$vatSum,'total_with_vat'=>$total,'issue_date'=>$_POST['issue_date']??date('Y-m-d'),'due_date'=>$_POST['due_date']??date('Y-m-d',strtotime('+14 days')),'payment_method'=>$paymentMethod,'payment_status'=>$paymentStatus];
             try{
                 $pdf=PdfService::invoice($doc,array_map(fn($it)=>['name'=>$it[0],'quantity'=>$it[1],'unit'=>$it[2],'unit_price'=>$it[3],'vat_rate'=>$it[4],'line_total'=>$it[5]],$items),$this->company(),$cust,$type==='invoice'?rtrim(Env::get('APP_URL',''),'/').'/d/'.$publicToken.'/qr':null);
                 $file=$dir.'/'.$wid.'_'.$id.'.pdf';file_put_contents($file,$pdf);

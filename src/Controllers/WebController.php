@@ -8,6 +8,11 @@ final class WebController {
     private function scope(string $sql,array $params=[]):array{$s=$this->db->prepare($sql);$s->execute([Auth::workspaceId(),...$params]);return $s->fetchAll();}
     private function isSuperAdmin():bool{ $emails=array_filter(array_map('trim',explode(',',(string)Env::get('SUPER_ADMIN_EMAILS','')))); return in_array(strtolower((string)(Auth::user()['email']??'')),array_map('strtolower',$emails),true); }
     public function landing():void{ if(Auth::check()) { Response::redirect('/'); } View::render('landing',['title'=>'Byznio','settings'=>$this->saasSettings()]); }
+    public function publicLegal(string $page):void{
+        $allowed=['terms','recurring','contact','privacy'];
+        if(!in_array($page,$allowed,true)) Response::abort(404,'Stránka nebyla nalezena.');
+        View::renderStandalone('legal/'.$page,['title'=>match($page){'terms'=>'Obchodní podmínky','recurring'=>'Podmínky opakovaných plateb','contact'=>'Kontakt a podpora','privacy'=>'Ochrana osobních údajů'},'settings'=>$this->saasSettings(),'supportEmail'=>Env::get('SUPPORT_EMAIL','help@byznio.cz')]);
+    }
     public function dashboard():void{
         Auth::require();$wid=Auth::workspaceId();$k=[];
         $queries=['customers'=>'SELECT COUNT(*) FROM customers WHERE workspace_id=? AND active=1','invoices'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice"','overdue'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND payment_status!="paid" AND due_date<date("now")','jobs'=>'SELECT COUNT(*) FROM jobs WHERE workspace_id=? AND status NOT IN ("done","cancelled")'];

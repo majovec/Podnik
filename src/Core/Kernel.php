@@ -13,6 +13,10 @@ final class Kernel {
         header("Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;");
         $r=new Router(); $w=new WebController(Database::pdo());
         $r->get('/health',function(){header('Content-Type: application/json');echo json_encode(['ok'=>true,'app'=>\App\Core\Env::get('APP_NAME','Byznio'),'time'=>date(DATE_ATOM)]);exit;});
+        $r->get('/obchodni-podminky',fn()=> $w->publicLegal('terms'));
+        $r->get('/podminky-opakovanych-plateb',fn()=> $w->publicLegal('recurring'));
+        $r->get('/kontakt',fn()=> $w->publicLegal('contact'));
+        $r->get('/ochrana-osobnich-udaju',fn()=> $w->publicLegal('privacy'));
         $r->get('/mail/logo/{id}',function($id){ $wid=(int)$id; $token=(string)($_GET['token']??''); $expected=hash_hmac('sha256',(string)$wid,(string)\App\Core\Env::get('APP_KEY','')); if($wid<1||$token===''||!hash_equals($expected,$token)){http_response_code(404);exit;} $pdo=\App\Core\Database::pdo(); $s=$pdo->prepare('SELECT logo_path FROM workspaces WHERE id=?'); $s->execute([$wid]); $path=$s->fetchColumn(); $file=$path?dirname(__DIR__,2).'/'.ltrim((string)$path,'/'):''; if(!$file||!is_file($file)){http_response_code(404);exit;} $mime=(new \finfo(FILEINFO_MIME_TYPE))->file($file); if(!in_array($mime,['image/png','image/jpeg','image/svg+xml'],true)){http_response_code(404);exit;} header('Content-Type: '.$mime); header('Cache-Control: public, max-age=86400'); readfile($file); exit; });
         $r->get('/',fn()=> Auth::check() ? $w->dashboard() : $w->landing());
         $r->get('/dashboard',fn()=> $w->dashboard());

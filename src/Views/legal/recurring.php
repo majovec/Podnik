@@ -1,0 +1,12 @@
+<?php $monthly=(float)($settings['monthly_price_czk']??300); $yearly=(float)($settings['yearly_price_czk']??3240); ob_start(); ?>
+<section class="hero"><div class="eyebrow">GoPay · opakované platby</div><h1>Podmínky opakovaných plateb</h1><p>Samostatné informace k automatickému strhávání předplatného Byznio.</p></section>
+<article class="card">
+<h2>Jak opakovaná platba funguje</h2><p>Při aktivaci předplatného zákazník zvolí fakturační období a výslovně souhlasí s opakováním platby. První platba aktivuje předplatné; další platby jsou podle zvoleného období iniciovány prostřednictvím GoPay.</p>
+<div class="pricegrid"><div class="card"><div class="muted">Měsíční varianta</div><div class="price"><?=number_format($monthly,0,',',' ')?> Kč</div><div class="muted">každý měsíc</div></div><div class="card"><div class="muted">Roční varianta</div><div class="price"><?=number_format($yearly,0,',',' ')?> Kč</div><div class="muted">každý rok</div></div></div>
+<h2>Co zákazník potvrzuje</h2><ul><li>souhlas s částkou a zvolenou periodou;</li><li>že jde o opakovanou platbu za předplatné;</li><li>že další platby budou probíhat podle zvolené periody do zrušení;</li><li>že informace o předplatném a jeho stavu jsou dostupné v aplikaci.</li></ul>
+<h2>Změna nebo zrušení</h2><p>Zákazník může předplatné zrušit v aplikaci nebo požádat zákaznickou podporu na <a class="email" href="mailto:<?=\App\Core\View::e($supportEmail)?>"><?=\App\Core\View::e($supportEmail)?></a>. Po zrušení nebude pro další období vytvořeno nové automatické stržení, přičemž již zaplacené období se řídí podmínkami služby.</p>
+<h2>Neúspěšná platba</h2><p>Pokud se opakovaná platba nepodaří, stav předplatného může být označen jako neuhrazený a zákazník může být vyzván k nápravě nebo aktualizaci platebních údajů prostřednictvím platební služby.</p>
+<h2>Provozovatel služby</h2><p>Provozovatelem služby Byznio je Jakub Mai, IČO 08536155, Komenského 17, 563 01 Lanškroun, Česká republika. Zákaznická a technická podpora: <a class="email" href="mailto:<?=\App\Core\View::e($supportEmail)?>"><?=\App\Core\View::e($supportEmail)?></a>.</p><h2>Poskytovatel platební služby</h2><p>Platební zpracování zajišťuje GoPay. Údaje platební karty zpracovává platební služba v rozsahu potřebném pro autorizaci a opakování platby.</p>
+<div class="notice"><strong>Samostatný dokument:</strong> Tato stránka není obecnými obchodními podmínkami. Je určena výhradně k informování o mechanismu opakovaných plateb.</div>
+</article>
+<?php $content=ob_get_clean(); include __DIR__.'/_layout.php'; ?>

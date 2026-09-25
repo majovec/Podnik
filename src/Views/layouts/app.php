@@ -27,11 +27,11 @@ if(!$public && \App\Core\Auth::check()){
     }catch(\Throwable $e){ $niaBriefing=['Jsem připravená pomoct. Řekni mi, co dnes potřebuješ vyřešit.']; }
 }
 $companyLogoUrl=null; if(!empty($workspaceLayout['logo_path'])){ $logoToken=hash_hmac('sha256',(string)\App\Core\Auth::workspaceId(),(string)\App\Core\Env::get('APP_KEY','')); $companyLogoUrl='/mail/logo/'.(int)\App\Core\Auth::workspaceId().'?token='.$logoToken; }
-$navPermissions=['/communication'=>null,'/documents'=>'invoicing','/jobs'=>'jobs','/expenses'=>'expenses','/products'=>'inventory','/bank'=>'bank','/calendar'=>'calendar','/tax'=>'tax','/tasks'=>'tasks','/ai'=>'ai','/recurring'=>'invoicing','/automation'=>'automation','/settings'=>'settings','/documents/files'=>'documents'];
+$navPermissions=['/communication'=>null,'/documents'=>'invoicing','/jobs'=>'jobs','/expenses'=>'expenses','/products'=>'inventory','/bank'=>'bank','/calendar'=>'calendar','/tax'=>'tax','/tasks'=>'tasks','/ai'=>'ai','/recurring'=>'invoicing','/received-invoices'=>'expenses','/automation'=>'automation','/settings'=>'settings','/documents/files'=>'documents'];
 $nav=[
  ['/','Přehled','home'], ['/customers','CRM','users'], ['/communication','Komunikace','mail'], ['/documents','Doklady','file'], ['/jobs','Zakázky','briefcase'],
  ['/expenses','Výdaje','receipt'], ['/products','Sklad','box'], ['/bank','Banka','bank'], ['/calendar','Kalendář','calendar'],
- ['/recurring','Opakované','repeat'], ['/tax','Daně','percent'], ['/tasks','Úkoly','check'],
+ ['/recurring','Opakované','repeat'], ['/received-invoices','Přijaté faktury','inbox'], ['/tax','Daně','percent'], ['/tasks','Úkoly','check'],
  ['/documents/files','Dokumenty','folder'], ['/reminders','Upomínky','bell'], ['/automation','Automatizace','workflow'],
  ['/settings','Nastavení','settings'], ['/export?type=invoices','Exporty','download']
 ];
@@ -111,3 +111,8 @@ setInterval(()=>{if(!document.hidden&&!panel.classList.contains('open'))showProa
 <?php else: ?><?php include $file; ?><?php endif; ?>
 
 </body></html>
+<style>
+#byznio-nia-float{position:fixed;right:22px;bottom:22px;z-index:9999;width:62px;height:62px;border:0;border-radius:50%;background:linear-gradient(145deg,#2563eb,#7c3aed);box-shadow:0 12px 35px rgba(37,99,235,.35);cursor:pointer;color:#fff;font-size:30px;animation:niaFloat 4s ease-in-out infinite}#byznio-nia-panel{position:fixed;right:22px;bottom:96px;width:min(360px,calc(100vw - 32px));z-index:9998;background:#fff;border:1px solid #dbe4f0;border-radius:18px;box-shadow:0 20px 60px rgba(15,23,42,.2);padding:16px;display:none}#byznio-nia-panel.open{display:block}.nia-bubble{background:#f5f8ff;border-radius:14px;padding:12px;margin-bottom:10px;color:#334155;font-size:13px;line-height:1.5}.nia-input{display:flex;gap:7px}.nia-input input{flex:1;border:1px solid #d7e0eb;border-radius:10px;padding:10px}.nia-input button{border:0;border-radius:10px;background:#2563eb;color:#fff;padding:0 14px;font-weight:700}@keyframes niaFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+</style>
+<button id="byznio-nia-float" aria-label="NiA">🤖</button><div id="byznio-nia-panel"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong>NiA</strong><button onclick="document.getElementById('byznio-nia-panel').classList.remove('open')" style="border:0;background:none;font-size:20px">×</button></div><div class="nia-bubble" id="niaBubble">Jsem NiA. Napiš mi, co chceš v Byzniu udělat.</div><div class="nia-input"><input id="niaInput" placeholder="Např. vytvoř fakturu…"><button id="niaSend">Poslat</button></div></div>
+<script>(function(){const b=document.getElementById('byznio-nia-float'),p=document.getElementById('byznio-nia-panel'),i=document.getElementById('niaInput'),s=document.getElementById('niaSend'),out=document.getElementById('niaBubble');if(!b)return;b.onclick=()=>{p.classList.toggle('open');if(p.classList.contains('open'))i.focus()};async function ask(){const v=i.value.trim();if(!v)return;out.textContent='Pracuji…';try{const fd=new FormData();fd.append('_csrf',document.querySelector('input[name="_csrf"]')?.value||'');fd.append('prompt',v);const r=await fetch('/ai/ask',{method:'POST',body:fd});const j=await r.json();out.textContent=j.answer||j.error||'NiA nemá odpověď.';}catch(e){out.textContent='NiA se teď nepodařilo spojit.'}i.value=''}s.onclick=ask;i.addEventListener('keydown',e=>{if(e.key==='Enter')ask()});})();</script>

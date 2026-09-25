@@ -1,4 +1,4 @@
-<h1 class="h">Daně a odvody</h1>
+<h1 class="h">Daně a odvody</h1><div class="card" style="margin:12px 0;background:#fff8e1">Výpočet je pouze orientační podklad pro účetní, není to daňové přiznání. Sazby a limity ověřte pro zvolený rok.</div>
 <div class="sub">Orientační přehled příjmů, výdajů, DPH, daně z příjmu a odvodů pro zvolený daňový rok.</div>
 
 <div class="grid">
@@ -23,7 +23,7 @@
       <div class="field"><label>Způsob uplatnění výdajů</label><select name="income_tax_method"><option value="actual" <?=($profile['income_tax_method']??'actual')==='actual'?'selected':''?>>Skutečné výdaje</option><option value="expense_lump" <?=($profile['income_tax_method']??'actual')==='expense_lump'?'selected':''?>>Výdajový paušál</option></select></div>
     </div>
     <div class="row">
-      <div class="field"><label>Sazba sociálního (%)</label><input type="number" step="0.01" name="social_rate" value="<?=\App\Core\View::e($profile['social_rate']??0)?>"></div>
+      <div class="field"><label>Hranice 23% sazby (Kč)</label><input type="number" step="1" name="tax_threshold" value="<?=\App\Core\View::e($profile['tax_threshold']??1762812)?>"></div><div class="field"><label>Sazba sociálního (%)</label><input type="number" step="0.01" name="social_rate" value="<?=\App\Core\View::e($profile['social_rate']??0)?>"></div>
       <div class="field"><label>Sazba zdravotního (%)</label><input type="number" step="0.01" name="health_rate" value="<?=\App\Core\View::e($profile['health_rate']??0)?>"></div>
     </div>
     <div class="row">

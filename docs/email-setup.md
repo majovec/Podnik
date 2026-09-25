@@ -1,87 +1,84 @@
-# Byznio – bezpečné odesílání e-mailů přes Postmark
+# Byznio – e-mailová infrastruktura
 
-Byznio používá pro odchozí transakční e-maily **Postmark Email API**. Aplikace už nepoužívá PHP `mail()` ani neodesílá zprávy bez autentizace.
+Byznio používá pro odchozí transakční e-maily **Brevo Email API**. Pro příjem faktur používá **Brevo Inbound Parsing**, který doručí přijatý e-mail jako strukturovaný JSON webhook a umožňuje stáhnout přílohy přes `DownloadToken`.
 
-## Proč Postmark
+## 1. Odchozí e-maily
 
-Pro Byznio je vhodný hlavně proto, že jde o transakční e-mailovou službu a podporuje **ověření celé domény**. Po ověření `byznio.cz` lze posílat z libovolných adres na této doméně, takže aplikace může dynamicky používat například `firma1@byznio.cz`, `firma2@byznio.cz` atd. bez vytváření jednotlivých sender signature pro každou firmu. Postmark tuto možnost výslovně doporučuje pro velké množství odesílacích adres.
-
-## 1. Založení Postmark
-
-1. Vytvořte Postmark účet.
-2. V Postmark otevřete **Sender Signatures / Domains**.
-3. Přidejte doménu `byznio.cz` a zvolte **Domain Verification**.
-4. Postmark zobrazí unikátní DNS hodnoty pro DKIM.
-5. Přidejte je do DNS správce domény `byznio.cz`.
-6. Po propagaci v Postmarku spusťte ověření.
-
-Po ověření domény není nutné vytvářet sender signature pro každou adresu. Libovolná adresa `*@byznio.cz` může být použita jako From.
-
-## 2. DKIM
-
-Postmark pro doménu vygeneruje unikátní TXT záznam. **Nehádejte jeho hodnotu a nekopírujte příklad z této dokumentace** – použijte přesně hodnotu, kterou Postmark zobrazí v DNS Settings.
-
-Typ: `TXT`
-
-Host: hodnotu `DKIMPendingHost` / hostname z Postmarku
-
-Value: hodnotu `DKIMPendingTextValue` / TXT value z Postmarku
-
-Po ověření začne Postmark zprávy pro `byznio.cz` podepisovat DKIM.
-
-## 3. Custom Return-Path / SPF
-
-V Postmarku nastavte custom Return-Path podle hodnoty, kterou vám Postmark zobrazí. Typicky jde o:
-
-- CNAME host: `pm_bounces`
-- CNAME target: `pm.mtasv.net`
-
-Tím Postmark používá vlastní Return-Path pod vaší doménou a zprávy mohou projít SPF alignmentem.
-
-Postmark dnes uvádí, že není nutné přidávat `include:spf.mtasv.net` do vlastního SPF záznamu pouze kvůli Postmarku, protože SPF se vyhodnocuje přes Return-Path. Pokud už `byznio.cz` SPF používá, **nevytvářejte druhý SPF TXT záznam**; případné existující SPF záznamy sloučte podle skutečných odesílatelů domény.
-
-## 4. DMARC
-
-Doporučený začátek je monitorovací politika, například:
-
-```text
-Type: TXT
-Host: _dmarc
-Value: v=DMARC1; p=none; rua=mailto:dmarc@byznio.cz; adkim=r; aspf=r
-```
-
-Po ověření, že všechny legitimní zdroje pošty fungují, lze politiku zpřísnit na `quarantine` a následně podle výsledků na `reject`. DMARC slouží k ochraně domény před spoofingem a zneužitím identity odesílatele.
-
-## 5. Nastavení VPS
-
-Do `.env` vložte:
+Aplikace používá frontu `email_queue` a `MailerService`, který volá Brevo API přes cURL. API klíč je pouze v `.env`.
 
 ```dotenv
-POSTMARK_SERVER_TOKEN=...
-POSTMARK_MESSAGE_STREAM=outbound
+BREVO_API_KEY=...
 MAIL_FROM=info@byznio.cz
 MAIL_FROM_NAME=Byznio
 ```
 
-Token nesmí být uložen v GitHubu.
+Firemní odesílací adresy jsou vytvářené jako `email_localpart@mail_domain`, kde `mail_domain` je standardně `byznio.cz`.
 
-Aplikace pak používá jako From například:
+## 2. Příjem faktur e-mailem
 
-```text
-Novák s.r.o. <novak@byznio.cz>
+Přijaté faktury používají Brevo Inbound Parsing. Brevo aktuálně vyžaduje, aby receiving domain/subdomain byl odlišný od domény používané pro odesílání. Proto je výchozí receiving domain v Byzniu `inbox.byznio.cz`.
+
+```dotenv
+MAIL_INBOUND_DOMAIN=inbox.byznio.cz
+BREVO_INBOUND_WEBHOOK_TOKEN=dlouhy-nahodny-token
 ```
 
-Podmínkou je, že `byznio.cz` je v Postmarku ověřená doména. Postmark výslovně podporuje odesílání z libovolných adres na ověřené doméně.
+Každý workspace má svůj `email_localpart`, takže například `nova` dostane adresu:
 
-## 6. Co aplikace dělá
+```text
+nova@inbox.byznio.cz
+```
 
-- všechny e-maily jdou přes autentizované Postmark API;
-- nepoužívá se PHP `mail()`;
-- fronta `email_queue` zůstává zachována;
-- cron pouze vezme zprávy z fronty a odešle je přes Postmark;
-- PDF přílohy se posílají jako Postmark attachment;
-- firemní logo se používá v HTML e-mailu, pokud ho firma nahrála;
-- při chybě se uloží Postmark HTTP/cURL chyba do `email_queue.last_error`;
-- `POSTMARK_SERVER_TOKEN` je pouze v `.env`.
+Pokud bude později potřeba přesně `nova@byznio.cz`, lze nad touto vrstvou doplnit alias/přeposílání na úrovni poštovní infrastruktury.
 
-Postmark má oficiální PHP knihovnu, ale Byznio používá přímo jejich HTTPS API přes PHP cURL, takže není nutná další runtime závislost. Postmark API vyžaduje `X-Postmark-Server-Token`.
+### DNS
+
+V Brevo Inbound Parsing nastavte receiving domain `inbox.byznio.cz`. Brevo dokumentuje MX záznamy pro inbound server jako `inbound1.sendinblue.com` s prioritou 10 a `inbound2.sendinblue.com` s prioritou 20. DNS změny mohou trvat několik hodin.
+
+### Webhook
+
+URL webhooku:
+
+```text
+https://VAŠE-DOMÉNA/webhooks/brevo/inbound
+```
+
+Webhook nastavte jako typ `inbound` s událostí `inboundEmailProcessed`. Brevo podporuje vlastní hlavičky webhooku; Byznio očekává:
+
+```text
+X-Byznio-Inbound-Token: <stejná hodnota jako BREVO_INBOUND_WEBHOOK_TOKEN>
+```
+
+Přijatý payload obsahuje odesílatele, příjemce, předmět, text/HTML a seznam příloh. Byznio přílohy PDF/JPG/PNG/TIFF/WebP stáhne přes Brevo API a uloží je do workspace.
+
+## 3. Automatické načtení faktury
+
+Webhook pouze rychle uloží e-mail a přílohu. OCR se spouští následně přes `cron/worker.php`, takže příjem e-mailu nemusí čekat na AI.
+
+Z faktury se automaticky pokoušíme načíst:
+
+- dodavatele,
+- IČO a DIČ,
+- číslo faktury,
+- variabilní symbol,
+- datum vystavení,
+- datum splatnosti,
+- částku bez DPH,
+- DPH,
+- celkovou částku,
+- měnu,
+- bankovní účet a IBAN do OCR JSON pro další rozšíření.
+
+Uživatel má vždy možnost údaje zkontrolovat a ručně upravit.
+
+## 4. Ruční import
+
+Na stránce **Přijaté faktury** lze také nahrát PDF nebo fotografii faktury. Ruční import používá stejný OCR mechanismus.
+
+## 5. Bezpečnost
+
+- webhook je chráněn samostatným tajným tokenem,
+- API klíče nejsou v GitHubu, ale pouze v `.env`,
+- přílohy jsou ukládány odděleně podle workspace,
+- každý přijatý e-mail je proti opakovanému webhooku chráněn idempotentní kontrolou,
+- OCR běží mimo webhook v cron workeru.

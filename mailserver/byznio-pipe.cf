@@ -1,0 +1,3 @@
+# Postfix transport for Byznio application mail.
+byznio-pipe unix  -       n       n       -       -       pipe
+  flags=Rq user=www-data argv=/usr/local/bin/byznio-inbound-mail --recipient=${original_recipient}

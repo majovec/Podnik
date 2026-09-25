@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__).'/vendor/autoload.php';require dirname(__DIR__).'/src/bootstrap.php';
-use App\Core\{Database,Env};use App\Services\{MatcherService,DocumentService,MailerService,FioService,BankTokenService,BackupService};
+use App\Core\{Database,Env};use App\Services\{MatcherService,DocumentService,MailerService,FioService,BankTokenService,BackupService,OcrService};
 $pdo=Database::pdo();
 // Bank sync: only explicitly connected accounts; Fio token is read-only by design.
 $accounts=$pdo->query("SELECT * FROM bank_accounts WHERE active=1 AND provider='fio'")->fetchAll();
@@ -28,6 +28,23 @@ foreach($rows as $r){try{$id=DocumentService::createFromTemplate($pdo,$r);$inter
                 : $currentDate->modify('+'.$months.' months');
         }
         $pdo->prepare('UPDATE recurring_invoices SET next_run=? WHERE id=?')->execute([$nextDate->format('Y-m-d'),$r['id']]);if($id&&$r['send_email']){ $s=$pdo->prepare('SELECT email FROM customers WHERE id=? AND workspace_id=?');$s->execute([$r['customer_id'],$r['workspace_id']]);$email=$s->fetchColumn();if($email){$tk=$pdo->prepare('SELECT public_token,doc_number FROM documents WHERE id=? AND workspace_id=?');$tk->execute([$id,$r['workspace_id']]);$doc=$tk->fetch();if($doc)$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$r['workspace_id'],$email,'Nová faktura','Byla vytvořena nová pravidelná faktura č. '.$doc['doc_number'],rtrim(Env::get('APP_URL',''),'/').'/d/'.$doc['public_token'],'queued']);}}}catch(Throwable $e){error_log($e->getMessage());}}
+// Background OCR for received invoices imported by email. The webhook stays fast; OCR runs here.
+$pending=$pdo->query("SELECT id,attachment_path FROM received_invoices WHERE ocr_status='pending' AND attachment_path IS NOT NULL ORDER BY id LIMIT 20")->fetchAll();
+foreach($pending as $ri){
+    $id=(int)$ri['id'];
+    $pdo->prepare("UPDATE received_invoices SET ocr_status='processing' WHERE id=? AND ocr_status='pending'")->execute([$id]);
+    try{
+        $ocr=OcrService::extract((string)$ri['attachment_path']);
+        $d=is_array($ocr['data']??null)?$ocr['data']:[];
+        $status=($ocr['status']??'')==='ok'?'done':'failed';
+        $note=$status==='done'?'Údaje byly automaticky načteny z faktury. Zkontrolujte je před zaúčtováním.':($ocr['message']??'Automatické načtení se nepodařilo.');
+        $date=function($v){$v=trim((string)$v);if($v==='')return null;$t=strtotime($v);return $t?date('Y-m-d',$t):null;};
+        $pdo->prepare('UPDATE received_invoices SET supplier=?,ico=?,dic=?,document_number=?,variable_symbol=?,issue_date=?,due_date=?,currency=?,amount_without_vat=?,vat_amount=?,total_amount=?,ocr_json=?,ocr_status=?,note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([trim((string)($d['supplier']??''))?:null,trim((string)($d['ico']??''))?:null,trim((string)($d['dic']??''))?:null,trim((string)($d['document_number']??''))?:null,trim((string)($d['variable_symbol']??''))?:null,$date($d['issue_date']??null),$date($d['due_date']??null),strtoupper(trim((string)($d['currency']??'CZK')))?:'CZK',(float)($d['amount_without_vat']??0),(float)($d['vat_amount']??0),(float)($d['total']??$d['total_amount']??0),json_encode($d,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$status,$note,$id]);
+    }catch(Throwable $e){
+        $pdo->prepare("UPDATE received_invoices SET ocr_status='failed',note=? WHERE id=?")->execute(['Automatické načtení se nepodařilo: '.$e->getMessage(),$id]);
+    }
+}
+
 // Payment statuses.
 $pdo->exec("UPDATE documents SET payment_status='overdue' WHERE doc_type IN ('invoice','proforma') AND payment_status='unpaid' AND due_date<date('now')");
 // Scheduled invoice reminders with deduplication.
@@ -161,7 +178,7 @@ if((int)$today->format('d')===1){
     foreach($ws as $w) queuePeriodicReport($pdo,$w,'monthly',$first->format('Y-m-d'),$end->format('Y-m-d'),$prevStart->format('Y-m-d'),$prevEnd->format('Y-m-d'),'Měsíční souhrnný report','last_monthly_report_at');
 }
 
-// Queue mail through authenticated Postmark API.
+// Queue mail through authenticated Brevo API.
 
 $emails=$pdo->query("SELECT q.*,w.name workspace_name,w.email_localpart,w.mail_enabled,w.logo_path,ss.mail_domain FROM email_queue q JOIN workspaces w ON w.id=q.workspace_id CROSS JOIN saas_settings ss WHERE q.status='queued' AND (q.scheduled_at IS NULL OR q.scheduled_at<=datetime('now')) ORDER BY q.id LIMIT 50")->fetchAll();foreach($emails as $e){$from=((int)$e['mail_enabled']&&$e['email_localpart'])?$e['email_localpart'].'@'.$e['mail_domain']:Env::get('MAIL_FROM');$ok=!empty($e['html_body'])?MailerService::sendReport($e['to_email'],$e['subject'],$e['body'],$e['html_body'],$from,$e['workspace_name'],$e['action_url']??null,$e['logo_path']??null,(int)$e['workspace_id'],$e['reply_to']??$from):MailerService::send($e['to_email'],$e['subject'],$e['body'],$e['attachment_path']??null,$from,$e['workspace_name'],$e['action_url']??null,$e['logo_path']??null,(int)$e['workspace_id'],$e['reply_to']??$from);$pdo->prepare('UPDATE email_queue SET status=?,attempts=attempts+1,last_error=? WHERE id=?')->execute([$ok?'sent':'failed',$ok?null:MailerService::lastError(),$e['id']]);if($ok && !empty($e['html_body'])){if(str_starts_with((string)$e['subject'],'Týdenní report Byznio'))$pdo->prepare('UPDATE workspaces SET last_weekly_report_at=CURRENT_TIMESTAMP WHERE id=?')->execute([(int)$e['workspace_id']]);elseif(str_starts_with((string)$e['subject'],'Měsíční report Byznio'))$pdo->prepare('UPDATE workspaces SET last_monthly_report_at=CURRENT_TIMESTAMP WHERE id=?')->execute([(int)$e['workspace_id']]);}}
 // Automatic daily backup: execute at most once every 24 hours.

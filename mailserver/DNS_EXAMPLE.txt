@@ -1,0 +1,20 @@
+DNS pro vlastní mailserver Byznio – příklad
+
+A
+mail.byznio.cz              300   46.36.44.105
+
+MX
+byznio.cz                   300   10 mail.byznio.cz.
+
+TXT SPF (pokud pro byznio.cz zatím žádný SPF nemáte)
+byznio.cz                   300   "v=spf1 ip4:46.36.44.105 ~all"
+
+DKIM
+Přesnou hodnotu pro mail._domainkey.byznio.cz vypíše install.sh z právě vygenerovaného klíče.
+
+DMARC
+Současný _dmarc záznam lze ponechat; po úspěšném testování lze politiku později zpřísnit.
+
+PTR / reverse DNS
+46.36.44.105 -> mail.byznio.cz
+PTR se nastavuje u poskytovatele VPS, nikoli v DNS zóně WEDOS.

@@ -2,7 +2,7 @@
 namespace App\Controllers;
 use PDO;
 use App\Core\{Auth,View,Response,Env};
-use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService,BankCsvParser,AccountingExportService,EmailTemplateService,CnbRateService};
+use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService,BankCsvParser,AccountingExportService,EmailTemplateService,CnbRateService,InboundMailService};
 final class WebController {
     public function __construct(private PDO $db){}
     private function scope(string $sql,array $params=[]):array{$s=$this->db->prepare($sql);$s->execute([Auth::workspaceId(),...$params]);return $s->fetchAll();}
@@ -717,6 +717,22 @@ final class WebController {
             http_response_code(500); header('Content-Type: application/json');
             echo json_encode(['ok'=>false]);
         }
+    }
+
+    public function brevoInbound():void{
+        try{
+            $payload=json_decode((string)file_get_contents('php://input'),true)?:[];
+            $result=InboundMailService::handleBrevoWebhook($this->db,$payload);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok'=>true]+$result,JSON_UNESCAPED_UNICODE);
+        }catch(\Throwable $e){
+            if(http_response_code()===401) return;
+            error_log('Brevo inbound: '.$e->getMessage());
+            http_response_code(400);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok'=>false,'error'=>'invalid inbound webhook']);
+        }
+        exit;
     }
 
     public function postmarkInbound(string $secret):void{

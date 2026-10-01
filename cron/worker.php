@@ -1,9 +1,45 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__).'/vendor/autoload.php';require dirname(__DIR__).'/src/bootstrap.php';
-use App\Core\{Database,Env};use App\Services\{MatcherService,DocumentService,MailerService,FioService,BankTokenService,BackupService,OcrService};
+use App\Core\{Database,Env};use App\Services\{MatcherService,DocumentService,MailerService,FioService,SaltEdgeService,BankTokenService,BackupService,OcrService};
 $pdo=Database::pdo();
 // Bank sync: only explicitly connected accounts; Fio token is read-only by design.
+// Salt Edge sync: each workspace has its own Salt Edge customer/connection.
+if(Env::get('SALTEDGE_APP_ID') && Env::get('SALTEDGE_SECRET')){
+    $connections=$pdo->query("SELECT * FROM bank_connections WHERE provider='saltedge' AND connection_ref IS NOT NULL")->fetchAll();
+    foreach($connections as $c){
+        try{
+            $acc=SaltEdgeService::accounts((string)$c['connection_ref']);
+            foreach(($acc['data']??[]) as $a){
+                $bank=$pdo->prepare('SELECT id FROM bank_accounts WHERE workspace_id=? AND provider=? AND external_id=? LIMIT 1');
+                $bank->execute([$c['workspace_id'],'saltedge',(string)$c['connection_ref']]);
+                $bankId=$bank->fetchColumn();
+                if(!$bankId){
+                    $pdo->prepare('INSERT INTO bank_accounts(workspace_id,name,provider,external_id,read_only,active) VALUES(?,?,?,?,1,1)')->execute([$c['workspace_id'],$a['name']??'Open Banking účet','saltedge',(string)$c['connection_ref']]);
+                    $bankId=(int)$pdo->lastInsertId();
+                }
+                $tx=SaltEdgeService::transactions((string)$c['connection_ref'],(string)($a['id']??''));
+                foreach(($tx['data']??[]) as $r){
+                    $extra=is_array($r['extra']??null)?$r['extra']:[];
+                    $amount=(float)($r['amount']??0);
+                    $date=$r['made_on']??$r['booked_on']??date('Y-m-d');
+                    $external=(string)($r['id']??sha1(json_encode($r)));
+                    $desc=(string)($r['description']??$r['information']??'');
+                    $vs=(string)($r['variable_symbol']??$extra['variable_symbol']??'');
+                    $accNo=(string)($r['account_number']??$extra['account_number']??'');
+                    $ref=(string)($r['end_to_end_id']??$r['reference']??$extra['reference']??'');
+                    $q=$pdo->prepare('INSERT OR IGNORE INTO bank_transactions(workspace_id,bank_account_id,booked_at,amount,currency,counterparty,account_number,variable_symbol,constant_symbol,specific_symbol,reference,message,status,external_id,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+                    $q->execute([$c['workspace_id'],$bankId,$date,$amount,$r['currency_code']??'CZK',$desc,$accNo,preg_replace('/\D/','',$vs),'','','',$ref,$desc,'unmatched',$external,json_encode($r,JSON_UNESCAPED_UNICODE)]);
+                    if($q->rowCount()) MatcherService::match($pdo,(int)$c['workspace_id'],(int)$pdo->lastInsertId());
+                }
+            }
+            $pdo->prepare('UPDATE bank_connections SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL,status="active" WHERE id=?')->execute([$c['id']]);
+        }catch(Throwable $e){
+            $pdo->prepare('UPDATE bank_connections SET last_error=? WHERE id=?')->execute([$e->getMessage(),$c['id']]);
+        }
+    }
+}
+
 $accounts=$pdo->query("SELECT * FROM bank_accounts WHERE active=1 AND provider='fio'")->fetchAll();
 foreach($accounts as $a){try{$token=BankTokenService::decrypt((string)$a['token_encrypted']);$data=FioService::movementsFromLast($token);foreach(FioService::normalize($data) as $r){$st=$pdo->prepare('INSERT OR IGNORE INTO bank_transactions(workspace_id,bank_account_id,booked_at,amount,currency,counterparty,account_number,variable_symbol,constant_symbol,specific_symbol,reference,message,status,external_id,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');$st->execute([$a['workspace_id'],$a['id'],$r['booked_at'],$r['amount'],$r['currency'],$r['counterparty'],$r['account_number'],$r['variable_symbol'],$r['constant_symbol'],$r['specific_symbol'],$r['reference'],$r['message'],'unmatched',$r['external_id'],$r['raw_json']]);if($st->rowCount())MatcherService::match($pdo,(int)$a['workspace_id'],(int)$pdo->lastInsertId());}$pdo->prepare('UPDATE bank_accounts SET last_sync_at=CURRENT_TIMESTAMP,last_error=NULL WHERE id=?')->execute([$a['id']]);}catch(Throwable $e){$pdo->prepare('UPDATE bank_accounts SET last_error=? WHERE id=?')->execute([$e->getMessage(),$a['id']]);}}
 // Recurring invoices and basic reminders.

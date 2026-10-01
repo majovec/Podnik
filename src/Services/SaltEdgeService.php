@@ -7,7 +7,7 @@ final class SaltEdgeService {
         if(!$id||!$secret) throw new \RuntimeException('Salt Edge není nakonfigurován.');
         $ch=curl_init('https://www.saltedge.com/api/v6'.$path);
         $h=['Accept: application/json','Content-Type: application/json','App-id: '.$id,'Secret: '.$secret];
-        $o=[CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>60,CURLOPT_HTTPHEADER=>$h,CURLOPT_CUSTOMREQUEST=>$method];
+        $o=[CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>60,CURLOPT_IPRESOLVE=>CURL_IPRESOLVE_V4,CURLOPT_HTTPHEADER=>$h,CURLOPT_CUSTOMREQUEST=>$method];
         if($body){$o[CURLOPT_POSTFIELDS]=json_encode(['data'=>$body],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);}
         curl_setopt_array($ch,$o);$raw=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);$err=curl_error($ch);curl_close($ch);
         $j=json_decode((string)$raw,true);if($raw===false||$code>=400)throw new \RuntimeException('Salt Edge HTTP '.$code.': '.(($j['error']['message']??null) ?: ($err ?: $raw)));return is_array($j)?$j:[];

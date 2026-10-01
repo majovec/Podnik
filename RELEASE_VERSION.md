@@ -1,3 +1,4 @@
-2026.09.25-r64
+2026.09.24-r59
 
-Current release: R64 – Gemini AI provider + Gemini OCR. GoPay integration remains unchanged and waits for credentials.
+
+Current release: R62 – Přijaté faktury import/OCR + Brevo inbound.

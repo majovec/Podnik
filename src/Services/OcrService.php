@@ -18,14 +18,37 @@ final class OcrService {
   return self::askImage($key,$prompt,$path);
  }
  private static function askText(string $key,string $prompt,string $text):array {
+  if(strtolower(trim((string)Env::get('AI_PROVIDER','openai')))==='gemini') {
+   return self::geminiRequest($key,Env::get('AI_MODEL','gemini-2.5-flash'),[
+    ['text'=>'Jsi OCR účetních dokladů. Vracej pouze validní JSON.'],
+    ['text'=>$prompt."\n\nText faktury:\n".mb_substr($text,0,50000)]
+   ]);
+  }
   $payload=['model'=>Env::get('AI_MODEL','gpt-5-mini'),'messages'=>[['role'=>'system','content'=>'Jsi OCR účetních dokladů. Vracej pouze validní JSON.'],['role'=>'user','content'=>$prompt."\n\nText faktury:\n".mb_substr($text,0,50000)]],'temperature'=>0];
   return self::request($key,$payload);
  }
  private static function askImage(string $key,string $prompt,string $path):array {
   $mime=(new \finfo(FILEINFO_MIME_TYPE))->file($path);$data=base64_encode((string)file_get_contents($path));
+  if(strtolower(trim((string)Env::get('AI_PROVIDER','openai')))==='gemini') {
+   return self::geminiRequest($key,Env::get('AI_VISION_MODEL',Env::get('AI_MODEL','gemini-2.5-flash')),[
+    ['text'=>'Jsi OCR účetních dokladů. Vracej pouze validní JSON.'],
+    ['text'=>$prompt],
+    ['inlineData'=>['mimeType'=>$mime,'data'=>$data]]
+   ]);
+  }
   $content=[['type'=>'text','text'=>$prompt],['type'=>'image_url','image_url'=>['url'=>'data:'.$mime.';base64,'.$data]]];
   $payload=['model'=>Env::get('AI_VISION_MODEL',Env::get('AI_MODEL','gpt-5-mini')),'messages'=>[['role'=>'system','content'=>'Jsi OCR účetních dokladů. Vracej pouze validní JSON.'],['role'=>'user','content'=>$content]],'temperature'=>0];
   return self::request($key,$payload);
+ }
+ private static function geminiRequest(string $key,string $model,array $parts):array {
+  $base=rtrim((string)Env::get('AI_BASE_URL','https://generativelanguage.googleapis.com/v1beta'),'/');
+  $url=$base.'/models/'.rawurlencode($model).':generateContent?key='.rawurlencode($key);
+  $payload=['contents'=>[['role'=>'user','parts'=>$parts]],'generationConfig'=>['temperature'=>0]];
+  $ch=curl_init($url);curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_POST=>true,CURLOPT_TIMEOUT=>120,CURLOPT_HTTPHEADER=>['Content-Type: application/json'],CURLOPT_POSTFIELDS=>json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)]);$body=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);$err=curl_error($ch);curl_close($ch);$j=json_decode((string)$body,true);
+  if($code>=400)throw new \RuntimeException('Gemini OCR HTTP '.$code.': '.($err?:($j['error']['message']??$body)));
+  $text='';foreach(($j['candidates'][0]['content']['parts']??[]) as $part)if(isset($part['text']))$text.=(string)$part['text'];
+  $text=preg_replace('/^```(?:json)?|```$/m','',trim($text));$parsed=json_decode($text,true);
+  return ['status'=>'ok','data'=>is_array($parsed)?$parsed:[]];
  }
  private static function request(string $key,array $payload):array {
   $ch=curl_init(rtrim(Env::get('AI_BASE_URL','https://api.openai.com/v1'),'/').'/chat/completions');curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_POST=>true,CURLOPT_TIMEOUT=>120,CURLOPT_HTTPHEADER=>['Authorization: Bearer '.$key,'Content-Type: application/json'],CURLOPT_POSTFIELDS=>json_encode($payload,JSON_UNESCAPED_UNICODE)]);$body=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);$err=curl_error($ch);curl_close($ch);$j=json_decode((string)$body,true);if($code>=400)throw new \RuntimeException('OCR HTTP '.$code.': '.($err?:($j['error']['message']??$body)));$text=$j['choices'][0]['message']['content']??'{}';$text=preg_replace('/^```(?:json)?|```$/m','',trim($text));$parsed=json_decode($text,true);return ['status'=>'ok','data'=>is_array($parsed)?$parsed:[]];

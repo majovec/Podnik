@@ -4,6 +4,7 @@ use App\Controllers\WebController;
 use App\Controllers\TaxController;
 use App\Controllers\AccountingController;
 use App\Controllers\ReceivedInvoicesController;
+use App\Controllers\ContractsController;
 use App\Controllers\ApiController;
 use App\Core\Auth;
 final class Kernel {
@@ -14,7 +15,7 @@ final class Kernel {
         header('X-Content-Type-Options: nosniff');
         header('Referrer-Policy: strict-origin-when-cross-origin');
         header("Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;");
-        $r=new Router(); $db=Database::pdo(); $w=new WebController($db); $tax=new TaxController($db); $accounting=new AccountingController($db); $received=new ReceivedInvoicesController($db);
+        $r=new Router(); $db=Database::pdo(); $w=new WebController($db); $tax=new TaxController($db); $accounting=new AccountingController($db); $received=new ReceivedInvoicesController($db); $contracts=new ContractsController($db);
         $r->get('/health',function(){header('Content-Type: application/json');echo json_encode(['ok'=>true,'app'=>\App\Core\Env::get('APP_NAME','Byznio'),'time'=>date(DATE_ATOM)]);exit;});
         $r->get('/obchodni-podminky',fn()=> $w->publicLegal('terms'));
         $r->get('/podminky-opakovanych-plateb',fn()=> $w->publicLegal('recurring'));
@@ -38,6 +39,7 @@ final class Kernel {
         $r->get('/jobs/{id}',fn($id)=>$w->jobDetail((int)$id)); $r->get('/jobs/{id}/edit',fn($id)=>$w->jobEdit((int)$id)); $r->post('/jobs/{id}/update',fn($id)=>$w->jobUpdate((int)$id)); $r->post('/jobs/{id}/material',fn($id)=>$w->jobMaterialSave((int)$id)); $r->post('/jobs/{id}/invoice',fn($id)=>$w->jobInvoice((int)$id));
         $r->get('/expenses',fn()=> $w->expenses()); $r->post('/expenses/save',fn()=> $w->expenseSave());
         $r->get('/products',fn()=> $w->products()); $r->post('/products/save',fn()=> $w->productSave()); $r->post('/products/move',fn()=> $w->stockMove());
+        $r->get('/contracts',fn()=> $contracts->index()); $r->get('/contracts/new/{id}',fn($id)=>$contracts->newFromTemplate((int)$id)); $r->post('/contracts/generate',fn()=> $contracts->generate()); $r->get('/contracts/{id}',fn($id)=>$contracts->show((int)$id)); $r->get('/contracts/{id}/pdf',fn($id)=>$contracts->pdf((int)$id)); $r->post('/contracts/{id}/delete',fn($id)=>$contracts->destroy((int)$id));
         $r->post('/products/inventory-count',fn()=> $w->inventoryCount()); $r->get('/products/{id}/edit',fn($id)=>$w->productEdit((int)$id)); $r->post('/products/{id}/update',fn($id)=>$w->productUpdate((int)$id));
         $r->get('/gopay/subscription/callback',fn()=> $w->goPaySubscriptionCallback()); $r->get('/gopay/subscription/webhook',fn()=> $w->goPaySubscriptionWebhook()); $r->post('/gopay/subscription/webhook',fn()=> $w->goPaySubscriptionWebhook());
         $r->get('/bank',fn()=> $w->bank()); $r->post('/bank/gopay/{id}',fn($id)=>$w->goPayLink((int)$id)); $r->get('/gopay/callback',fn()=> $w->goPayCallback()); $r->post('/gopay/webhook',fn()=> $w->goPayWebhook()); $r->post('/bank/import',fn()=> $w->bankImport()); $r->post('/bank/match/{id}',fn($id)=>$w->bankMatch((int)$id)); $r->get('/bank/accounts',fn()=> $w->bankSettings()); $r->post('/bank/accounts',fn()=> $w->bankConnect()); $r->post('/bank/accounts/{id}/sync',fn($id)=>$w->bankSync((int)$id));

@@ -61,5 +61,155 @@ final class Database {
         self::$pdo->exec("CREATE TABLE IF NOT EXISTS mailbox_attachments(id INTEGER PRIMARY KEY AUTOINCREMENT,message_id INTEGER NOT NULL,filename TEXT NOT NULL,mime TEXT,size INTEGER NOT NULL DEFAULT 0,path TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(message_id) REFERENCES mailbox_messages(id) ON DELETE CASCADE)");
         self::$pdo->exec("CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_message ON mailbox_attachments(message_id)");
         $seed=self::$pdo->query("SELECT id,email_localpart,name,mail_enabled,mail_display_name FROM workspaces WHERE email_localpart IS NOT NULL AND trim(email_localpart)!=''")->fetchAll();$ins=self::$pdo->prepare("INSERT OR IGNORE INTO email_mailboxes(workspace_id,localpart,display_name,active,is_system) VALUES(?,?,?,?,0)");foreach($seed as $row){$ins->execute([(int)$row['id'],strtolower(trim((string)$row['email_localpart'])),trim((string)($row['mail_display_name']?:$row['name'])),!empty($row['mail_enabled'])?1:0]);}
+        self::$pdo->exec("CREATE TABLE IF NOT EXISTS contract_templates(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id INTEGER,slug TEXT,name TEXT NOT NULL,body TEXT NOT NULL,is_system INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE)");
+        self::$pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_contract_templates_system_slug ON contract_templates(slug) WHERE is_system=1");
+        self::$pdo->exec("CREATE INDEX IF NOT EXISTS idx_contract_templates_workspace ON contract_templates(workspace_id)");
+        self::$pdo->exec("CREATE TABLE IF NOT EXISTS contracts(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id INTEGER NOT NULL,customer_id INTEGER,template_id INTEGER,name TEXT NOT NULL,body TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'final',file_id INTEGER,created_by INTEGER,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,FOREIGN KEY(customer_id) REFERENCES customers(id) ON DELETE SET NULL,FOREIGN KEY(template_id) REFERENCES contract_templates(id) ON DELETE SET NULL,FOREIGN KEY(file_id) REFERENCES documents_files(id) ON DELETE SET NULL)");
+        self::$pdo->exec("CREATE INDEX IF NOT EXISTS idx_contracts_workspace ON contracts(workspace_id,created_at)");
+        $contractSeeds=[
+            'kupni-smlouva'=>['Kupní smlouva','KUPNÍ SMLOUVA
+uzavřená podle § 2079 a násl. zákona č. 89/2012 Sb., občanský zákoník, v platném znění (dále jen „občanský zákoník")
+
+Prodávající: {{dodavatel_nazev}}, se sídlem {{dodavatel_adresa}}, IČO: {{dodavatel_ico}}{{dodavatel_dic_radek}}
+(dále jen „prodávající")
+
+Kupující: {{zakaznik_nazev}}, {{zakaznik_adresa}}{{zakaznik_ico_radek}}
+(dále jen „kupující")
+
+Článek I. – Předmět smlouvy
+1. Prodávající se touto smlouvou zavazuje odevzdat kupujícímu následující zboží/věc: {{predmet}}, a umožnit mu nabytí vlastnického práva k němu.
+2. Kupující se zavazuje předmět koupě převzít a zaplatit prodávajícímu sjednanou kupní cenu.
+
+Článek II. – Kupní cena a platební podmínky
+1. Kupní cena byla stranami sjednána ve výši {{cena}} Kč (slovy dle aktuálního kurzu), a to včetně DPH, je-li prodávající plátcem DPH.
+2. Kupní cena je splatná na základě daňového dokladu (faktury) vystaveného prodávajícím, nedohodnou-li se strany jinak.
+
+Článek III. – Předání a přechod vlastnického práva
+1. Místem předání předmětu koupě je {{misto}}, nedohodnou-li se strany jinak.
+2. Vlastnické právo k předmětu koupě přechází na kupujícího okamžikem jeho převzetí, případně úplným zaplacením kupní ceny, bude-li sjednána výhrada vlastnického práva.
+3. Nebezpečí škody na věci přechází na kupujícího okamžikem převzetí předmětu koupě.
+
+Článek IV. – Práva z vadného plnění
+Práva a povinnosti stran týkající se práv z vadného plnění se řídí příslušnými ustanoveními občanského zákoníku.
+
+Článek V. – Závěrečná ustanovení
+1. Tato smlouva nabývá platnosti a účinnosti dnem jejího podpisu oběma stranami.
+2. Smlouvu lze měnit pouze písemnými dodatky podepsanými oběma stranami.
+3. Právní vztahy touto smlouvou výslovně neupravené se řídí občanským zákoníkem a dalšími obecně závaznými právními předpisy České republiky.
+4. Tento vzor je obecným návrhem smluvního textu. Doporučujeme jej před použitím v konkrétním případě nechat zkontrolovat advokátem, zejména u vyšších částek nebo nestandardních podmínek.
+
+V {{misto}} dne {{datum}}
+
+
+_______________________________          _______________________________
+            Prodávající                                Kupující'],
+            'smlouva-o-dilo'=>['Smlouva o dílo','SMLOUVA O DÍLO
+uzavřená podle § 2586 a násl. zákona č. 89/2012 Sb., občanský zákoník, v platném znění (dále jen „občanský zákoník")
+
+Zhotovitel: {{dodavatel_nazev}}, se sídlem {{dodavatel_adresa}}, IČO: {{dodavatel_ico}}{{dodavatel_dic_radek}}
+(dále jen „zhotovitel")
+
+Objednatel: {{zakaznik_nazev}}, {{zakaznik_adresa}}{{zakaznik_ico_radek}}
+(dále jen „objednatel")
+
+Článek I. – Předmět smlouvy
+1. Zhotovitel se zavazuje na vlastní náklady a nebezpečí provést pro objednatele dílo: {{predmet}}.
+2. Objednatel se zavazuje dílo řádně dokončené a bez vad převzít a zaplatit zhotoviteli sjednanou cenu.
+
+Článek II. – Cena díla
+1. Cena za dílo byla stranami sjednána ve výši {{cena}} Kč, a to včetně DPH, je-li zhotovitel plátcem DPH.
+2. Cena je splatná na základě daňového dokladu vystaveného zhotovitelem po dokončení a předání díla, nedohodnou-li se strany na zálohách nebo dílčím fakturačním plánu.
+
+Článek III. – Místo a termín plnění
+1. Místem provedení díla je {{misto}}, nedohodnou-li se strany jinak.
+2. Dílo bude provedeno v termínu dohodnutém mezi stranami počínaje dnem {{datum}}.
+
+Článek IV. – Předání díla a odpovědnost za vady
+1. Dílo je provedeno, je-li dokončeno a objednatelem převzato. O předání a převzetí díla sepíší strany předávací protokol, pokud si to povaha díla žádá.
+2. Práva a povinnosti z vadného plnění se řídí příslušnými ustanoveními občanského zákoníku.
+
+Článek V. – Závěrečná ustanovení
+1. Tato smlouva nabývá platnosti a účinnosti dnem jejího podpisu oběma stranami.
+2. Smlouvu lze měnit pouze písemnými dodatky podepsanými oběma stranami.
+3. Právní vztahy touto smlouvou výslovně neupravené se řídí občanským zákoníkem a dalšími obecně závaznými právními předpisy České republiky.
+4. Tento vzor je obecným návrhem smluvního textu. Doporučujeme jej před použitím v konkrétním případě nechat zkontrolovat advokátem, zejména u rozsáhlejších zakázek.
+
+V {{misto}} dne {{datum}}
+
+
+_______________________________          _______________________________
+             Zhotovitel                               Objednatel'],
+            'smlouva-o-sluzbach'=>['Smlouva o poskytování služeb','SMLOUVA O POSKYTOVÁNÍ SLUŽEB
+uzavřená podle § 1746 odst. 2 zákona č. 89/2012 Sb., občanský zákoník, v platném znění (dále jen „občanský zákoník")
+
+Poskytovatel: {{dodavatel_nazev}}, se sídlem {{dodavatel_adresa}}, IČO: {{dodavatel_ico}}{{dodavatel_dic_radek}}
+(dále jen „poskytovatel")
+
+Objednatel: {{zakaznik_nazev}}, {{zakaznik_adresa}}{{zakaznik_ico_radek}}
+(dále jen „objednatel")
+
+Článek I. – Předmět smlouvy
+1. Poskytovatel se zavazuje pro objednatele zajišťovat tyto služby: {{predmet}}.
+2. Objednatel se zavazuje za řádně poskytnuté služby zaplatit sjednanou cenu.
+
+Článek II. – Cena a platební podmínky
+1. Cena za služby byla sjednána ve výši {{cena}} Kč, a to včetně DPH, je-li poskytovatel plátcem DPH, nedohodnou-li se strany na jiném způsobu určení ceny (např. hodinová sazba, paušál).
+2. Cena je splatná na základě daňových dokladů vystavovaných poskytovatelem, obvykle měsíčně nebo po dokončení jednotlivých etap plnění, nedohodnou-li se strany jinak.
+
+Článek III. – Místo a doba plnění
+1. Služby budou poskytovány v {{misto}}, případně distančně, nedohodnou-li se strany jinak.
+2. Smluvní vztah vzniká dnem {{datum}} a trvá do splnění sjednaného rozsahu služeb, případně na dobu neurčitou s výpovědní dobou 1 měsíc, nedohodnou-li se strany jinak.
+
+Článek IV. – Mlčenlivost
+Obě strany se zavazují zachovávat mlčenlivost o důvěrných informacích, které si v souvislosti s plněním této smlouvy vzájemně poskytnou.
+
+Článek V. – Závěrečná ustanovení
+1. Tato smlouva nabývá platnosti a účinnosti dnem jejího podpisu oběma stranami.
+2. Smlouvu lze měnit pouze písemnými dodatky podepsanými oběma stranami.
+3. Právní vztahy touto smlouvou výslovně neupravené se řídí občanským zákoníkem a dalšími obecně závaznými právními předpisy České republiky.
+4. Tento vzor je obecným návrhem smluvního textu. Doporučujeme jej před použitím v konkrétním případě nechat zkontrolovat advokátem, zejména u dlouhodobé spolupráce.
+
+V {{misto}} dne {{datum}}
+
+
+_______________________________          _______________________________
+            Poskytovatel                               Objednatel'],
+            'smlouva-o-mlcenlivosti'=>['Smlouva o mlčenlivosti (NDA)','SMLOUVA O MLČENLIVOSTI (NDA)
+uzavřená podle § 1746 odst. 2 zákona č. 89/2012 Sb., občanský zákoník, v platném znění (dále jen „občanský zákoník")
+
+Strana 1: {{dodavatel_nazev}}, se sídlem {{dodavatel_adresa}}, IČO: {{dodavatel_ico}}{{dodavatel_dic_radek}}
+
+Strana 2: {{zakaznik_nazev}}, {{zakaznik_adresa}}{{zakaznik_ico_radek}}
+
+(společně dále jen „strany")
+
+Článek I. – Účel smlouvy
+Strany spolu hodlají jednat o/spolupracovat na: {{predmet}}, a v této souvislosti si mohou vzájemně poskytnout důvěrné informace, které si přejí chránit touto smlouvou.
+
+Článek II. – Důvěrné informace
+1. Důvěrnou informací se rozumí jakákoliv informace obchodní, technické, finanční nebo jiné povahy, kterou jedna strana sdělí druhé v souvislosti s účelem dle čl. I, ať už ústně, písemně nebo elektronicky, a která je označena jako důvěrná nebo z povahy věci jako důvěrná vyplývá.
+2. Za důvěrné informace se nepovažují informace, které jsou veřejně dostupné, nebo které strana prokazatelně znala před jejich sdělením druhou stranou.
+
+Článek III. – Povinnost mlčenlivosti
+1. Strany se zavazují nakládat s důvěrnými informacemi jako s obchodním tajemstvím, nezpřístupnit je třetím osobám a nepoužít je k jinému účelu, než je účel dle čl. I.
+2. Tato povinnost trvá po dobu trvání jednání/spolupráce a dále {{cena}} měsíců/let po jejím ukončení (doplňte dle dohody).
+
+Článek IV. – Sankce
+V případě porušení povinnosti mlčenlivosti má poškozená strana právo na náhradu škody v plné výši, případně na smluvní pokutu, pokud ji strany samostatně sjednají.
+
+Článek V. – Závěrečná ustanovení
+1. Tato smlouva nabývá platnosti a účinnosti dnem jejího podpisu oběma stranami.
+2. Smlouvu lze měnit pouze písemnými dodatky podepsanými oběma stranami.
+3. Právní vztahy touto smlouvou výslovně neupravené se řídí občanským zákoníkem a dalšími obecně závaznými právními předpisy České republiky.
+4. Tento vzor je obecným návrhem smluvního textu. Doporučujeme jej před použitím v konkrétním případě nechat zkontrolovat advokátem.
+
+V {{misto}} dne {{datum}}
+
+
+_______________________________          _______________________________
+               Strana 1                                Strana 2'],
+        ];
+        $insCt=self::$pdo->prepare("INSERT OR IGNORE INTO contract_templates(workspace_id,slug,name,body,is_system) VALUES(NULL,?,?,?,1)");
+        foreach($contractSeeds as $slug=>[$name,$body]) $insCt->execute([$slug,$name,$body]);
     }
 }

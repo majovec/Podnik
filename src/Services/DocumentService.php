@@ -14,8 +14,8 @@ final class DocumentService {
        if($storedYear!==$year){$n=1;$db->prepare('UPDATE document_series SET next_number=2,series_year=?,year_prefix=? WHERE workspace_id=? AND doc_type=?')->execute([$year,$prefix,$wid,$type]);}
        else $db->prepare('UPDATE document_series SET next_number=next_number+1 WHERE workspace_id=? AND doc_type=?')->execute([$wid,$type]);
      }
-     if($ownTx)$db->commit();return $prefix.'-'.$year.'-'.str_pad((string)$n,5,'0',STR_PAD_LEFT);
-   }catch(\Throwable $e){if($ownTx&&$db->inTransaction())$db->rollBack();throw $e;}
+     if($ownTx)$db->exec('COMMIT');return $prefix.'-'.$year.'-'.str_pad((string)$n,5,'0',STR_PAD_LEFT);
+   }catch(\Throwable $e){if($ownTx){try{$db->exec('ROLLBACK');}catch(\Throwable $e2){}}throw $e;}
  }
  public static function paid(PDO $db,int $wid,int $docId):float{$s=$db->prepare('SELECT COALESCE(SUM(amount),0) FROM payments WHERE workspace_id=? AND document_id=?');$s->execute([$wid,$docId]);return (float)$s->fetchColumn();}
  public static function refreshPaymentStatus(PDO $db,int $wid,int $docId):void{$s=$db->prepare('SELECT total_with_vat FROM documents WHERE id=? AND workspace_id=?');$s->execute([$docId,$wid]);$total=(float)$s->fetchColumn();$paid=self::paid($db,$wid,$docId);$status=$paid<=0?'unpaid':($paid+0.01>=$total?'paid':'partially_paid');$db->prepare('UPDATE documents SET payment_status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND workspace_id=?')->execute([$status,$docId,$wid]);}

@@ -17,7 +17,7 @@ final class MailboxService {
     }
     public static function address(string $local):string{return self::normalizeLocalpart($local).'@'.self::domain();}
     public static function ensureWorkspace(PDO $db,int $workspaceId):int{
-        $q=$db->prepare('SELECT id,localpart,display_name,mail_enabled FROM email_mailboxes WHERE workspace_id=? AND is_system=0 LIMIT 1');$q->execute([$workspaceId]);$row=$q->fetch();
+        $q=$db->prepare('SELECT id,localpart,display_name,active FROM email_mailboxes WHERE workspace_id=? AND is_system=0 LIMIT 1');$q->execute([$workspaceId]);$row=$q->fetch();
         $w=$db->prepare('SELECT name,email_localpart,mail_enabled,mail_display_name FROM workspaces WHERE id=?');$w->execute([$workspaceId]);$workspace=$w->fetch();if(!$workspace)throw new \RuntimeException('Firma nenalezena.');
         $local=self::normalizeLocalpart((string)$workspace['email_localpart']);if($local==='')throw new \RuntimeException('Firma nemá nastavenou e-mailovou adresu.');
         if($err=self::validateLocalpart($local,false))throw new \RuntimeException($err);

@@ -64,3 +64,8 @@ CREATE TABLE IF NOT EXISTS mailbox_attachments(id INTEGER PRIMARY KEY AUTOINCREM
 CREATE INDEX IF NOT EXISTS idx_email_mailboxes_workspace ON email_mailboxes(workspace_id,active);
 CREATE INDEX IF NOT EXISTS idx_mailbox_messages ON mailbox_messages(mailbox_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_mailbox_attachments_message ON mailbox_attachments(message_id);
+CREATE TABLE IF NOT EXISTS contract_templates(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id INTEGER,slug TEXT,name TEXT NOT NULL,body TEXT NOT NULL,is_system INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contract_templates_system_slug ON contract_templates(slug) WHERE is_system=1;
+CREATE INDEX IF NOT EXISTS idx_contract_templates_workspace ON contract_templates(workspace_id);
+CREATE TABLE IF NOT EXISTS contracts(id INTEGER PRIMARY KEY AUTOINCREMENT,workspace_id INTEGER NOT NULL,customer_id INTEGER,template_id INTEGER,name TEXT NOT NULL,body TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'final',file_id INTEGER,created_by INTEGER,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,FOREIGN KEY(customer_id) REFERENCES customers(id) ON DELETE SET NULL,FOREIGN KEY(template_id) REFERENCES contract_templates(id) ON DELETE SET NULL,FOREIGN KEY(file_id) REFERENCES documents_files(id) ON DELETE SET NULL);
+CREATE INDEX IF NOT EXISTS idx_contracts_workspace ON contracts(workspace_id,created_at);

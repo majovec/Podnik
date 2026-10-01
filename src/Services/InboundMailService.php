@@ -7,30 +7,16 @@ use PDO;
 final class InboundMailService {
 
     public static function handleRawMessage(PDO $db, string $raw, string $recipient): array {
-        $domain=strtolower(trim((string)Env::get('MAIL_DOMAIN','byznio.cz')));
-        $recipient=strtolower(trim($recipient));
-        $parts=explode('@',$recipient,2);
-        if(count($parts)!==2 || strtolower($parts[1])!==$domain) throw new \RuntimeException('Neplatný příjemce.');
-        $local=$parts[0];
-        $q=$db->prepare('SELECT id FROM workspaces WHERE lower(email_localpart)=? AND COALESCE(mail_enabled,1)=1 LIMIT 1');$q->execute([$local]);$wid=(int)($q->fetchColumn()?:0);
-        if(!$wid) throw new \RuntimeException('Neznámá Byznio adresa: '.$recipient);
-        $parsed=self::parseRaw($raw);
-        $from=strtolower(trim($parsed['from']));$subject=trim($parsed['subject']);$messageId=trim($parsed['message_id']);
-        if($from==='') $from='unknown@invalid.local';
-        $exists=$messageId!==''?$db->prepare("SELECT id FROM email_messages WHERE workspace_id=? AND direction='inbound' AND message_id=? LIMIT 1"):null;
-        if($exists){$exists->execute([$wid,$messageId]);if($exists->fetchColumn())return ['workspace_id'=>$wid,'message_id'=>$messageId,'attachments'=>0,'duplicate'=>true];}
-        $cq=$db->prepare('SELECT id FROM customers WHERE workspace_id=? AND lower(email)=? LIMIT 1');$cq->execute([$wid,$from]);$customerId=(int)($cq->fetchColumn()?:0);
-        $db->prepare('INSERT INTO email_messages(workspace_id,customer_id,direction,from_email,to_email,subject,body,html_body,message_id) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$wid,$customerId?:null,'inbound',$from,$recipient,$subject,$parsed['text'],$parsed['html'],$messageId?:null]);
-        if($customerId)$db->prepare('INSERT INTO customer_communications(workspace_id,customer_id,channel,direction,subject,message,created_by) VALUES(?,?,?,?,?,?,NULL)')->execute([$wid,$customerId,'email','inbound',$subject,$parsed['text']]);
-        $count=0;
-        foreach($parsed['attachments'] as $att){
-            $name=(string)$att['name'];$mime=strtolower((string)$att['mime']);$data=$att['data'];
-            if(!self::isInvoiceAttachment($name,$mime)||strlen($data)>15*1024*1024)continue;
-            $dir=dirname(__DIR__,2).'/storage/received-invoices/'.$wid;if(!is_dir($dir))@mkdir($dir,0775,true);
-            $safe=preg_replace('/[^a-zA-Z0-9._-]+/','_',basename($name))?:'invoice';$path=$dir.'/'.bin2hex(random_bytes(16)).'_'.$safe;if(file_put_contents($path,$data,LOCK_EX)===false)continue;
-            $sourceId=($messageId!==''?$messageId:'local:'.hash('sha256',$from.'|'.$recipient.'|'.$subject.'|'.hash('sha256',$data))).':'.hash('sha256',$name.'|'.hash('sha256',$data));
-            $dupe=$db->prepare('SELECT id FROM received_invoices WHERE workspace_id=? AND source_email_message_id=? LIMIT 1');$dupe->execute([$wid,$sourceId]);if($dupe->fetchColumn()){unlink($path);continue;}
-            $db->prepare('INSERT INTO received_invoices(workspace_id,supplier,document_number,payment_status,attachment_path,ocr_status,source_type,source_email_message_id,note) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$wid,$from,null,'unpaid',$path,'pending','email',$sourceId,'Přijato na '. $recipient .'. Automatické načtení údajů proběhne na pozadí.']);$count++;
+        $domain=strtolower(trim((string)Env::get('MAIL_DOMAIN','byznio.cz')));$recipient=strtolower(trim($recipient));$parts=explode('@',$recipient,2);if(count($parts)!==2||strtolower($parts[1])!==$domain)throw new \RuntimeException('Neplatný příjemce.');$local=$parts[0];
+        $bq=$db->prepare('SELECT * FROM email_mailboxes WHERE lower(localpart)=? AND active=1 LIMIT 1');$bq->execute([$local]);$box=$bq->fetch();
+        $wid=(int)($box['workspace_id']??0);if(!$box){$q=$db->prepare('SELECT id,name,email_localpart,mail_display_name FROM workspaces WHERE lower(email_localpart)=? AND COALESCE(mail_enabled,1)=1 LIMIT 1');$q->execute([$local]);$w=$q->fetch();if(!$w)throw new \RuntimeException('Neznámá Byznio adresa: '.$recipient);$wid=(int)$w['id'];MailboxService::ensureWorkspace($db,$wid);$bq->execute([$local]);$box=$bq->fetch();}
+        $parsed=self::parseRaw($raw);$from=strtolower(trim($parsed['from']));$subject=trim($parsed['subject']);$messageId=trim($parsed['message_id']);if($from==='')$from='unknown@invalid.local';
+        if($messageId!==''&&$box){$e=$db->prepare('SELECT id FROM mailbox_messages WHERE mailbox_id=? AND direction="inbound" AND message_id=? LIMIT 1');$e->execute([(int)$box['id'],$messageId]);if($e->fetchColumn())return ['workspace_id'=>$wid,'message_id'=>$messageId,'attachments'=>0,'duplicate'=>true];}
+        $customerId=0;if($wid){$cq=$db->prepare('SELECT id FROM customers WHERE workspace_id=? AND lower(email)=? LIMIT 1');$cq->execute([$wid,$from]);$customerId=(int)($cq->fetchColumn()?:0);}
+        $mailboxMessageId=null;if($box){$db->prepare('INSERT INTO mailbox_messages(mailbox_id,direction,from_email,to_email,subject,body,html_body,message_id,in_reply_to) VALUES(?,?,?,?,?,?,?,?,?)')->execute([(int)$box['id'],'inbound',$from,$recipient,$subject,$parsed['text'],$parsed['html'],$messageId?:null,$parsed['in_reply_to']??null]);$mailboxMessageId=(int)$db->lastInsertId();}
+        if($wid){$db->prepare('INSERT INTO email_messages(workspace_id,customer_id,direction,from_email,to_email,subject,body,html_body,message_id) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$wid,$customerId?:null,'inbound',$from,$recipient,$subject,$parsed['text'],$parsed['html'],$messageId?:null]);if($customerId)$db->prepare('INSERT INTO customer_communications(workspace_id,customer_id,channel,direction,subject,message,created_by) VALUES(?,?,?,?,?,?,NULL)')->execute([$wid,$customerId,'email','inbound',$subject,$parsed['text']]);}
+        $count=0;foreach($parsed['attachments'] as $att){$name=(string)$att['name'];$mime=strtolower((string)$att['mime']);$data=$att['data'];if(strlen($data)>25*1024*1024)continue;$dir=dirname(__DIR__,2).'/storage/mailbox/'.($wid?:'system').'/'.(int)$box['id'];if(!is_dir($dir))@mkdir($dir,0775,true);$safe=preg_replace('/[^a-zA-Z0-9._-]+/','_',basename($name))?:'attachment';$path=$dir.'/'.bin2hex(random_bytes(16)).'_'.$safe;if(file_put_contents($path,$data,LOCK_EX)===false)continue;if($mailboxMessageId)$db->prepare('INSERT INTO mailbox_attachments(message_id,filename,mime,size,path) VALUES(?,?,?,?,?)')->execute([$mailboxMessageId,$name,$mime,strlen($data),$path]);$count++;
+            if($wid&&self::isInvoiceAttachment($name,$mime)&&strlen($data)<=15*1024*1024){$sourceId=($messageId!==''?$messageId:'local:'.hash('sha256',$from.'|'.$recipient.'|'.$subject)).':'.hash('sha256',$name.'|'.hash('sha256',$data));$dupe=$db->prepare('SELECT id FROM received_invoices WHERE workspace_id=? AND source_email_message_id=? LIMIT 1');$dupe->execute([$wid,$sourceId]);if(!$dupe->fetchColumn())$db->prepare('INSERT INTO received_invoices(workspace_id,supplier,document_number,payment_status,attachment_path,ocr_status,source_type,source_email_message_id,note) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$wid,$from,null,'unpaid',$path,'pending','email',$sourceId,'Přijato na '.$recipient.'. Automatické načtení údajů proběhne na pozadí.']);}
         }
         return ['workspace_id'=>$wid,'message_id'=>$messageId,'attachments'=>$count,'duplicate'=>false];
     }
@@ -46,7 +32,7 @@ final class InboundMailService {
         $from=''; if(preg_match('/<([^>]+)>/',$headers['from']??'',$m))$from=strtolower(trim($m[1]));else{$from=strtolower(trim($headers['from']??''));}
         if(preg_match('/([A-Z0-9._%+\-]+@[A-Z0-9.\-]+)$/i',$from,$m))$from=strtolower($m[1]);
         $subject=$decodeHeader($headers['subject']??'');$messageId=trim($headers['message-id']??'');
-        $tree=self::parsePart($headers,$body);return ['from'=>$from,'subject'=>$subject,'message_id'=>$messageId,'text'=>$tree['text'],'html'=>$tree['html'],'attachments'=>$tree['attachments']];
+        $tree=self::parsePart($headers,$body);return ['from'=>$from,'subject'=>$subject,'message_id'=>$messageId,'in_reply_to'=>$inReply,'text'=>$tree['text'],'html'=>$tree['html'],'attachments'=>$tree['attachments']];
     }
 
     private static function parsePart(array $headers,string $body):array {

@@ -11,7 +11,7 @@ $domain=strtolower(trim((string)Env::get('MAIL_DOMAIN','byznio.cz')));
 $out=trim((string)Env::get('MAIL_POSTFIX_MAP','/etc/postfix/byznio_transport'));
 if($domain===''||$out==='') throw new RuntimeException('MAIL_DOMAIN/MAIL_POSTFIX_MAP není nastaven.');
 $pdo=Database::pdo();
-$st=$pdo->query("SELECT lower(trim(email_localpart)) AS localpart FROM workspaces WHERE COALESCE(mail_enabled,1)=1 AND email_localpart IS NOT NULL AND trim(email_localpart)!=''");
+$st=$pdo->query("SELECT lower(trim(localpart)) AS localpart FROM email_mailboxes WHERE active=1 AND localpart IS NOT NULL AND trim(localpart)!=''");
 $rows=[];
 foreach($st as $r){
     $local=(string)$r['localpart'];

@@ -221,4 +221,17 @@ final class MailerService {
             $name
         );
     }
+
+    public static function sendMailbox(string $to,string $subject,string $body,array $attachments,string $from,string $name,?string $inReplyTo=null):bool{
+        self::$lastError='';$sendmail=trim((string)Env::get('SENDMAIL_PATH','/usr/sbin/sendmail'));if(!is_executable($sendmail)){self::$lastError='Lokální sendmail není dostupný.';return false;}if(!filter_var($to,FILTER_VALIDATE_EMAIL)||!filter_var($from,FILTER_VALIDATE_EMAIL)){self::$lastError='Neplatná adresa odesílatele nebo příjemce.';return false;}
+        $eol="\r\n";
+        $headers=['From: '.self::mimeHeader($name).' <'.$from.'>','To: <'.$to+'>','Subject: '.self::mimeHeader($subject),'Date: '.date(DATE_RFC2822),'Message-ID: <'.bin2hex(random_bytes(12)).'@'.Env::get('MAIL_DOMAIN','byznio.cz').'>','MIME-Version: 1.0','X-Mailer: Byznio mailbox'];if($inReplyTo){$headers[]='In-Reply-To: '.$inReplyTo;$headers[]='References: '.$inReplyTo;}
+        $alt='=_ByznioAlt_'.bin2hex(random_bytes(8));$mix='=_ByznioMix_'.bin2hex(random_bytes(8));$html='<div style="font-family:Arial,sans-serif;white-space:pre-wrap">'.nl2br(htmlspecialchars($body,ENT_QUOTES,'UTF-8')).'</div>';
+        $out=implode($eol,$headers).$eol.$eol;
+        if($attachments){$out.='Content-Type: multipart/mixed; boundary="'.$mix.'"'.$eol.$eol;$out.='--'.$mix.$eol.'Content-Type: multipart/alternative; boundary="'.$alt.'"'.$eol.$eol;}else{$out.='Content-Type: multipart/alternative; boundary="'.$alt.'"'.$eol.$eol;}
+        $out.='--'.$alt.$eol.'Content-Type: text/plain; charset=UTF-8'.$eol.'Content-Transfer-Encoding: 8bit'.$eol.$eol.$body.$eol.$eol;$out.='--'.$alt.$eol.'Content-Type: text/html; charset=UTF-8'.$eol.'Content-Transfer-Encoding: 8bit'.$eol.$eol.$html.$eol.$eol.'--'.$alt.'--'.$eol;
+        if($attachments){foreach($attachments as $a){if(empty($a['path'])||!is_file($a['path']))continue;$fn=str_replace('"','',basename((string)($a['name']??basename($a['path']))));$mime=(string)($a['mime']??'application/octet-stream');$data=@file_get_contents($a['path']);if($data===false)continue;$out.='--'.$mix.$eol.'Content-Type: '.$mime.'; name="'.$fn.'"'.$eol.'Content-Disposition: attachment; filename="'.$fn.'"'.$eol.'Content-Transfer-Encoding: base64'.$eol.$eol.chunk_split(base64_encode($data),76,$eol).$eol;} $out.='--'.$mix.'--'.$eol;}
+        $proc=@proc_open([$sendmail,'-t','-oi'],[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes);if(!is_resource($proc)){self::$lastError='Nepodařilo se spustit sendmail.';return false;}fwrite($pipes[0],$out);fclose($pipes[0]);$stderr=stream_get_contents($pipes[2]);fclose($pipes[1]);fclose($pipes[2]);$code=proc_close($proc);if($code!==0){self::$lastError='Sendmail skončil kódem '.$code.($stderr!==''?': '.trim($stderr):'');return false;}return true;
+    }
+
 }

@@ -16,6 +16,14 @@ final class AiActionService
         $wid = Auth::workspaceId();
 
         // Deterministic high-confidence commands first.
+        // Reminder can be addressed directly to a customer name, e.g.
+        // "Odešli upomínku Jakubu Majerovi".
+        if (preg_match('/(?:odešli|odeslat|pošli|pošlem|pošlu)\s+upomínku\s+(.+?)(?:\s+k\s+(?:faktur[ue]|dokladu?)\b|\s*$)/iu', $prompt, $m)) {
+            $customerRef = trim($m[1]);
+            $doc = self::findInvoiceByCustomer($db, $wid, $customerRef);
+            if ($doc) return ['action_type'=>'send_reminder','payload'=>self::docPayload($doc)];
+        }
+
         if (preg_match('/(?:pošle?m|pošli|odeslat|odešli|upomínku).*?(?:faktur[ue]|doklad)\s*(?:č\.?\s*)?([a-z0-9_-]+)?/iu', $prompt, $m)
             || preg_match('/upomínku.*?([a-z]{0,4}-?\d{4}-?\d+)/iu', $prompt, $m)) {
             $ref = trim((string)($m[1] ?? ''));
@@ -135,10 +143,20 @@ final class AiActionService
     {
         $q=$db->prepare('SELECT d.*,c.email,c.company_name,c.first_name,c.last_name,w.name workspace_name,w.logo_path,w.email_localpart,w.mail_enabled FROM documents d LEFT JOIN customers c ON c.id=d.customer_id JOIN workspaces w ON w.id=d.workspace_id WHERE d.id=? AND d.workspace_id=?');$q->execute([(int)$doc['id'],$wid]);$d=$q->fetch();if(!$d)throw new \RuntimeException('Doklad nenalezen.');$email=trim((string)$d['email']);if(!filter_var($email,FILTER_VALIDATE_EMAIL))throw new \RuntimeException('Zákazník nemá platnou e-mailovou adresu.');
         $name=self::customerName($d);$base=rtrim((string)\App\Core\Env::get('APP_URL',''),'/');$url=$base.'/d/'.$d['public_token'];
-        if($reminder){if($d['payment_status']==='paid')throw new \RuntimeException('Tato faktura je již uhrazená.');$days=max(0,(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400));$subject='Upomínka k faktuře '.$d['doc_number'];$intro=$days>0?'faktura '.$d['doc_number'].' je '.$days.' dní po splatnosti.':'faktura '.$d['doc_number'].' není podle systému dosud uhrazena.';$type='reminder';$title='Upomínka k faktuře';
-        } else {$subject='Faktura '.$d['doc_number'];$intro='v příloze / odkazu zasíláme fakturu '.$d['doc_number'].' ve výši '.number_format((float)$d['total_with_vat'],2,',',' ').' Kč.';$type='invoice';$title='Faktura '.$d['doc_number'];}
-        $render=EmailTemplateService::render($type,['company'=>$d['workspace_name'],'logo'=>$base.'/assets/byznio-logo.svg','title'=>$title,'intro'=>'Dobrý den '.$name.', '.$intro,'action_url'=>$url,'action_text'=>'Otevřít doklad','details'=>['Doklad'=>$d['doc_number'],'Částka'=>number_format((float)$d['total_with_vat'],2,',',' ').' Kč','Splatnost'=>(string)$d['due_date']]]);
         $domain=trim((string)\App\Core\Env::get('MAIL_DOMAIN','')); if($domain===''){ $ss=$db->query('SELECT mail_domain FROM saas_settings WHERE id=1')->fetchColumn(); $domain=trim((string)$ss); }
+        if($reminder){
+            if($d['payment_status']==='paid')throw new \RuntimeException('Tato faktura je již uhrazená.');
+            $days=(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400);
+            $subject=$days>0?'Upomínka '.$d['doc_number']:'Upomínka k faktuře '.$d['doc_number'];
+            $body='Faktura '.$d['doc_number'].' ve výši '.number_format((float)$d['total_with_vat'],2,',',' ').' Kč je '.($days>0?'po splatnosti '.$days.' dní.':'dosud neuhrazená.');
+            $from=((int)($d['mail_enabled']??1) && !empty($d['email_localpart']) && $domain!=='') ? trim((string)$d['email_localpart']).'@'.$domain : null;
+            $ok=MailerService::send($email,$subject,$body,null,$from,$d['workspace_name'],null,$d['logo_path']??null,$wid,$from);
+            if(!$ok)throw new \RuntimeException('E-mail se nepodařilo odeslat: '.MailerService::lastError());
+            $db->prepare('INSERT INTO email_messages(workspace_id,customer_id,document_id,direction,from_email,to_email,subject,body,html_body) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$wid,$d['customer_id']?:null,$d['id'],'outbound',$from,$email,$subject,$body,null]);
+            $db->prepare('INSERT OR IGNORE INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)')->execute([$wid,$d['id'],$days]);
+            return ['message'=>'Upomínka k '.$d['doc_number'].' byla skutečně odeslána na '.$email.'.','entity'=>'document','id'=>(int)$d['id']];
+        } else {$subject='Faktura '.$d['doc_number'];$intro='v příloze / odkazu zasíláme fakturu '.$d['doc_number'].' ve výši '.number_format((float)$d['total_with_vat'],2,',',' ').' Kč.';$type='invoice';$title='Faktura '.$d['doc_number'];
+        $render=EmailTemplateService::render($type,['company'=>$d['workspace_name'],'logo'=>$base.'/assets/byznio-logo.svg','title'=>$title,'intro'=>'Dobrý den '.$name.', '.$intro,'action_url'=>$url,'action_text'=>'Otevřít doklad','details'=>['Doklad'=>$d['doc_number'],'Částka'=>number_format((float)$d['total_with_vat'],2,',',' ').' Kč','Splatnost'=>(string)$d['due_date']]]);
         $from=((int)($d['mail_enabled']??1) && !empty($d['email_localpart']) && $domain!=='') ? trim((string)$d['email_localpart']).'@'.$domain : null;
         $attachment=null;
         if(!$reminder){
@@ -151,11 +169,35 @@ final class AiActionService
         $db->prepare('INSERT INTO email_messages(workspace_id,customer_id,document_id,direction,from_email,to_email,subject,body,html_body) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$wid,$d['customer_id']?:null,$d['id'],'outbound',$from,$email,$subject,$render['text'],MailerService::htmlForLog($render['text'],$d['workspace_name'],null,$d['logo_path']??null,$wid)]);
         if($reminder)$db->prepare('INSERT OR IGNORE INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)')->execute([$wid,$d['id'],(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400)]);
         return ['message'=>($reminder?'Upomínka':'Faktura').' k '.$d['doc_number'].' byla skutečně odeslána na '.$email.'.','entity'=>'document','id'=>(int)$d['id']];
+        }
     }
     private static function findInvoice(PDO $db,int $wid,string $ref,string $prompt):?array
     {
         if($ref!==''){$q=$db->prepare('SELECT d.*,c.company_name,c.first_name,c.last_name,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.workspace_id=? AND d.doc_type="invoice" AND (d.doc_number=? OR d.variable_symbol=?) LIMIT 1');$q->execute([$wid,$ref,$ref]);if($d=$q->fetch())return $d;}
         $q=$db->prepare('SELECT d.*,c.company_name,c.first_name,c.last_name,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.workspace_id=? AND d.doc_type="invoice" AND d.payment_status!="paid" ORDER BY d.due_date ASC,d.id DESC LIMIT 1');$q->execute([$wid]);return $q->fetch()?:null;
+    }
+    private static function findInvoiceByCustomer(PDO $db,int $wid,string $name):?array
+    {
+        $name=trim(preg_replace('/\s+/u',' ',$name));
+        if($name==='') return null;
+        $tokens=preg_split('/\s+/u',$name,-1,PREG_SPLIT_NO_EMPTY);
+        $where=['d.workspace_id=?','d.doc_type="invoice"','d.payment_status!="paid"'];$args=[$wid];
+        foreach($tokens as $token){
+            if(mb_strlen($token)<2) continue;
+            $variants=[$token];
+            // Czech declensions: "Jakubu Majerovi" should still find "Jakub Majer".
+            $len=mb_strlen($token);
+            foreach([1,2] as $cut){
+                if($len>$cut+2){$variants[]=mb_substr($token,0,$len-$cut);}
+            }
+            $variants=array_values(array_unique($variants));
+            $parts=[];
+            foreach($variants as $variant){$like='%'.$variant.'%';$parts[]='(c.company_name LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ?)';array_push($args,$like,$like,$like);}
+            $where[]='('.implode(' OR ',$parts).')';
+        }
+        if(count($where)<=3) return null;
+        $sql='SELECT d.*,c.company_name,c.first_name,c.last_name,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE '.implode(' AND ',$where).' ORDER BY d.due_date ASC,d.id DESC LIMIT 1';
+        $q=$db->prepare($sql);$q->execute($args);return $q->fetch()?:null;
     }
     private static function docPayload(array $d):array{return ['document_id'=>(int)$d['id'],'doc_number'=>$d['doc_number'],'customer_id'=>(int)$d['customer_id'],'customer_name'=>self::customerName($d),'email'=>$d['email']??null,'amount'=>(float)$d['total_with_vat'],'due_date'=>$d['due_date']??null];}
     private static function customerName(array $c):string{return trim((string)($c['company_name']??'')) ?: trim((string)($c['first_name']??'').' '.(string)($c['last_name']??''));}

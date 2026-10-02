@@ -383,17 +383,30 @@ final class WebController {
         View::render('calendar/index',['title'=>'Kalendář','events'=>$events,'customers'=>$this->customersList(),'jobs'=>$this->scope('SELECT id,name FROM jobs WHERE workspace_id=? ORDER BY name'),'calendarMonth'=>$month]);
     }
     public function ai():void{
-        Auth::require();$this->gate();
-        $wid=Auth::workspaceId();$today=date('Y-m-d');
-        $q=$this->db->prepare('SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND payment_status!="paid" AND due_date<date("now")');$q->execute([$wid]);$overdue=(int)$q->fetchColumn();
-        $q=$this->db->prepare('SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND payment_status!="paid" AND due_date BETWEEN date("now") AND date("now","+7 days")');$q->execute([$wid]);$dueSoon=(int)$q->fetchColumn();
-        $q=$this->db->prepare('SELECT COUNT(*) FROM tasks WHERE workspace_id=? AND status="open" AND (due_at IS NULL OR date(due_at)<=date("now"))');$q->execute([$wid]);$tasks=(int)$q->fetchColumn();
-        $brief=[];if($tasks)$brief[]='Máte '.$tasks.' otevřených úkolů, které stojí za dnešní kontrolu.';if($overdue)$brief[]='Po splatnosti je '.$overdue.' faktur.';if($dueSoon)$brief[]='V příštích 7 dnech má splatnost '.$dueSoon.' faktur.';if(!$brief)$brief[]='Dnes nevypadá nic kriticky. Můžeme se podívat na zákazníky, faktury nebo zakázky.';
-        $chips=['Co mám dnes udělat?','Které faktury jsou po splatnosti?','Co mě čeká tento týden?'];if($overdue)$chips[]='Které faktury jsou po splatnosti?';if($dueSoon)$chips[]='Které faktury budou brzy splatné?';$chips=array_values(array_unique($chips));$chips=array_slice($chips,0,5);
-        $pending=$_SESSION['ai_pending']??null;View::render('ai/index',['title'=>'AI asistent','pending'=>$pending,'briefing'=>$brief,'chips'=>$chips,'assistant_name'=>'Nia','attention'=>($overdue>0||$dueSoon>0),'csrf'=>Auth::csrf()]);
+        Auth::require();
+        // Nia now lives directly in the app shell. The old full-screen chat is intentionally removed.
+        Response::redirect('/');
     }
     public function aiAsk():void{
         Auth::require();Auth::verifyCsrf();$prompt=trim((string)($_POST['prompt']??''));if($prompt==='')Response::json(['ok'=>false,'error'=>'Napište dotaz.'],422);
+
+        // Confirmation is conversational: no second preview/card is needed.
+        if(!empty($_SESSION['ai_pending'])){
+            if($this->isAiConfirmation($prompt)){
+                $a=$_SESSION['ai_pending'];
+                try{
+                    $result=\App\Services\AiActionService::execute($this->db,$a,(int)Auth::id());
+                    unset($_SESSION['ai_pending']);
+                    $this->audit('ai_action',$result['entity']??'action',(int)($result['id']??0),$a['payload']??[]);
+                    Response::json(['ok'=>true,'answer'=>$result['message']??'Akce byla provedena.','pending'=>null]);
+                }catch(\Throwable $e){Response::json(['ok'=>true,'answer'=>'Akci se nepodařilo provést: '.$e->getMessage(),'pending'=>$_SESSION['ai_pending']??null]);}
+            }
+            if($this->isAiCancellation($prompt)){
+                unset($_SESSION['ai_pending']);
+                Response::json(['ok'=>true,'answer'=>'Dobře, akci jsem zrušil.','pending'=>null]);
+            }
+        }
+
         $wid=Auth::workspaceId();
         $ctx=['today'=>date('Y-m-d'),'workspace'=>$this->company(),
             'customers'=>$this->scope('SELECT id,company_name,first_name,last_name,ico,email,phone FROM customers WHERE workspace_id=? AND active=1 LIMIT 200'),
@@ -410,12 +423,29 @@ final class WebController {
         $pending=\App\Services\AiActionService::plan($this->db,$prompt,$ctx);
         if($pending){
             $_SESSION['ai_pending']=$pending;
-            $labels=['create_customer'=>'zákazníka','create_invoice'=>'fakturu','create_offer'=>'nabídku','create_order'=>'objednávku','create_proforma'=>'zálohovou fakturu','create_credit'=>'dobropis','create_delivery'=>'dodací list','create_task'=>'úkol','complete_task'=>'dokončení úkolu','create_event'=>'událost','create_job'=>'zakázku','create_product'=>'produkt','create_expense'=>'náklad','mark_paid'=>'úhradu','send_invoice'=>'odeslání faktury','send_reminder'=>'odeslání upomínky','cancel_document'=>'storno dokladu'];
-            $answer='Připravil jsem akci: '.($labels[$pending['action_type']]??$pending['action_type']).'. Zkontrolujte návrh a potvrďte jej.';
+            $answer=$this->aiConfirmationQuestion($pending);
         } else {
             $answer=AiService::ask($prompt,$ctx);unset($_SESSION['ai_pending']);
         }
         Response::json(['ok'=>true,'answer'=>$answer,'pending'=>$_SESSION['ai_pending']??null]);
+    }
+
+    private function isAiConfirmation(string $text):bool{
+        $t=mb_strtolower(trim($text));
+        return (bool)preg_match('/^(?:ano|jo|jo,? ?chci|ano,? ?chci|jasně|jasne|potvrzuji|potvrď|potvrd|souhlasím|souhlasim|udělej to|udelej to)!?[.!\s]*$/u',$t);
+    }
+    private function isAiCancellation(string $text):bool{
+        $t=mb_strtolower(trim($text));
+        return (bool)preg_match('/^(?:ne|nechci|zruš|zrus|zrušit|zrusit|storno|cancel)(?: to| akci)?[.!\s]*$/u',$t);
+    }
+    private function aiConfirmationQuestion(array $pending):string{
+        $p=$pending['payload']??[];$type=$pending['action_type']??'';
+        if($type==='send_reminder'){
+            $name=trim((string)($p['customer_name']??'zákazník'));$doc=(string)($p['doc_number']??'');$amount=number_format((float)($p['amount']??0),2,',',' ').' Kč';
+            return 'Chcete odeslat upomínku '.$name.' k faktuře '.$doc.' ve výši '.$amount.'? Odešle se standardní text upomínky používaný v Byzniu.';
+        }
+        $labels=['create_customer'=>'zákazníka','create_invoice'=>'fakturu','create_offer'=>'nabídku','create_order'=>'objednávku','create_proforma'=>'zálohovou fakturu','create_credit'=>'dobropis','create_delivery'=>'dodací list','create_task'=>'úkol','complete_task'=>'dokončení úkolu','create_event'=>'událost','create_job'=>'zakázku','create_product'=>'produkt','create_expense'=>'náklad','mark_paid'=>'úhradu','send_invoice'=>'odeslání faktury','cancel_document'=>'storno dokladu'];
+        return 'Chcete provést akci: '.($labels[$type]??$type).'? Napište ano, pokud ji mám provést.';
     }
     public function aiCancel():void{Auth::require();Auth::verifyCsrf();unset($_SESSION['ai_pending']);Response::json(['ok'=>true,'message'=>'Návrh byl zrušen.']);}
     public function aiConfirm():void{

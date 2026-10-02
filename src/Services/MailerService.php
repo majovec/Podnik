@@ -228,8 +228,17 @@ final class MailerService {
     public static function sendMailbox(string $to,string $subject,string $body,array $attachments,string $from,string $name,?string $inReplyTo=null):bool{
         self::$lastError='';$sendmail=trim((string)Env::get('SENDMAIL_PATH','/usr/sbin/sendmail'));if(!is_executable($sendmail)){self::$lastError='Lokální sendmail není dostupný.';return false;}if(!filter_var($to,FILTER_VALIDATE_EMAIL)||!filter_var($from,FILTER_VALIDATE_EMAIL)){self::$lastError='Neplatná adresa odesílatele nebo příjemce.';return false;}
         $eol="\r\n";
-        $headers=['From: '.self::mimeHeader($name).' <'.$from.'>','To: <'.$to+'>','Subject: '.self::mimeHeader($subject),'Date: '.date(DATE_RFC2822),'Message-ID: <'.bin2hex(random_bytes(12)).'@'.Env::get('MAIL_DOMAIN','byznio.cz').'>','MIME-Version: 1.0','X-Mailer: Byznio mailbox'];if($inReplyTo){$headers[]='In-Reply-To: '.$inReplyTo;$headers[]='References: '.$inReplyTo;}
-        $alt='=_ByznioAlt_'.bin2hex(random_bytes(8));$mix='=_ByznioMix_'.bin2hex(random_bytes(8));$html='<div style="font-family:Arial,sans-serif;white-space:pre-wrap">'.nl2br(htmlspecialchars($body,ENT_QUOTES,'UTF-8')).'</div>';
+        $headers=['From: '.self::mimeHeader($name).' <'.$from.'>','To: <'.$to.'>','Subject: '.self::mimeHeader($subject),'Date: '.date(DATE_RFC2822),'Message-ID: <'.bin2hex(random_bytes(12)).'@'.Env::get('MAIL_DOMAIN','byznio.cz').'>','MIME-Version: 1.0','X-Mailer: Byznio mailbox'];if($inReplyTo){$headers[]='In-Reply-To: '.$inReplyTo;$headers[]='References: '.$inReplyTo;}
+        $alt='=_ByznioAlt_'.bin2hex(random_bytes(8));$mix='=_ByznioMix_'.bin2hex(random_bytes(8));
+        // System mailbox messages use the same Byznio-branded shell as invoices/reminders:
+        // logo/header at the top and Byznio footer at the bottom.
+        $html=self::shell(
+            '<p style="margin-top:0">Dobrý den,</p><div style="font-size:15px;line-height:1.7">'.nl2br(htmlspecialchars($body,ENT_QUOTES,'UTF-8')).'</div>',
+            $name,
+            null,
+            null,
+            null
+        );
         $out=implode($eol,$headers).$eol.$eol;
         if($attachments){$out.='Content-Type: multipart/mixed; boundary="'.$mix.'"'.$eol.$eol;$out.='--'.$mix.$eol.'Content-Type: multipart/alternative; boundary="'.$alt.'"'.$eol.$eol;}else{$out.='Content-Type: multipart/alternative; boundary="'.$alt.'"'.$eol.$eol;}
         $out.='--'.$alt.$eol.'Content-Type: text/plain; charset=UTF-8'.$eol.'Content-Transfer-Encoding: 8bit'.$eol.$eol.$body.$eol.$eol;$out.='--'.$alt.$eol.'Content-Type: text/html; charset=UTF-8'.$eol.'Content-Transfer-Encoding: 8bit'.$eol.$eol.$html.$eol.$eol.'--'.$alt.'--'.$eol;

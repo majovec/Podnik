@@ -549,7 +549,91 @@ final class WebController {
             $j=SaltEdgeService::connectSession((string)$ref,$return,'cz');$url=$j['data']['connect_url']??$j['data']['url']??$j['connect_url']??null;if(!$url)throw new \RuntimeException('Salt Edge nevrátil připojovací URL.');Response::redirect($url);
         }catch(\Throwable $e){Response::redirect('/bank/accounts?error='.rawurlencode('Open Banking: '.$e->getMessage()));}
     }
-    public function admin():void{Auth::requireRole(['owner','admin']);Response::redirect('/admin/plans');}
+    private function requireSuperAdmin(): void {
+        Auth::require();
+        if(!$this->isSuperAdmin()) Response::abort(403,'Pouze Super Admin.');
+    }
+    private function ensureSuperAdminSchema(): void {
+        $cols=$this->db->query('PRAGMA table_info(subscriptions)')->fetchAll();
+        $names=array_column($cols,'name');
+        if(!in_array('custom_monthly_price_czk',$names,true)) $this->db->exec('ALTER TABLE subscriptions ADD COLUMN custom_monthly_price_czk REAL');
+        if(!in_array('custom_yearly_price_czk',$names,true)) $this->db->exec('ALTER TABLE subscriptions ADD COLUMN custom_yearly_price_czk REAL');
+    }
+    public function admin():void{
+        $this->requireSuperAdmin();
+        $this->ensureSuperAdminSchema();
+        $stats=[];
+        $stats['workspaces']=(int)$this->db->query('SELECT COUNT(*) FROM workspaces')->fetchColumn();
+        $stats['users']=(int)$this->db->query('SELECT COUNT(*) FROM users')->fetchColumn();
+        $stats['active_users']=(int)$this->db->query('SELECT COUNT(*) FROM users WHERE active=1 AND last_login_at>=datetime("now","-30 days")')->fetchColumn();
+        $stats['inactive_users']=(int)$this->db->query('SELECT COUNT(*) FROM users WHERE active=1 AND (last_login_at IS NULL OR last_login_at<datetime("now","-30 days"))')->fetchColumn();
+        $stats['new_30']=(int)$this->db->query('SELECT COUNT(*) FROM workspaces WHERE created_at>=datetime("now","-30 days")')->fetchColumn();
+        $stats['trial']=(int)$this->db->query("SELECT COUNT(*) FROM subscriptions WHERE status='trial'")->fetchColumn();
+        $stats['paid']=(int)$this->db->query("SELECT COUNT(*) FROM subscriptions WHERE status IN ('active','free') AND (free_until IS NULL OR free_until>=date('now'))")->fetchColumn();
+        $stats['expiring_trial']=(int)$this->db->query("SELECT COUNT(*) FROM subscriptions WHERE status='trial' AND trial_ends_at IS NOT NULL AND trial_ends_at BETWEEN datetime('now') AND datetime('now','+7 days')")->fetchColumn();
+        $stats['mrr']=(float)$this->db->query("SELECT COALESCE(SUM(CASE WHEN COALESCE(custom_monthly_price_czk,0)>0 THEN custom_monthly_price_czk ELSE (SELECT monthly_price_czk FROM saas_settings WHERE id=1) END),0) FROM subscriptions WHERE status='active' AND billing_interval='month'")->fetchColumn();
+        $stats['yearly_mrr']=(float)$this->db->query("SELECT COALESCE(SUM((CASE WHEN COALESCE(custom_yearly_price_czk,0)>0 THEN custom_yearly_price_czk ELSE (SELECT yearly_price_czk FROM saas_settings WHERE id=1) END)/12.0),0) FROM subscriptions WHERE status='active' AND billing_interval='year'")->fetchColumn();
+        $stats['mrr']+= $stats['yearly_mrr'];
+        $activityExpr="MAX(COALESCE(u.last_login_at,''),COALESCE((SELECT MAX(created_at) FROM audit_log a WHERE a.workspace_id=w.id),''),COALESCE((SELECT MAX(created_at) FROM documents d WHERE d.workspace_id=w.id),''),COALESCE((SELECT MAX(created_at) FROM customers c WHERE c.workspace_id=w.id),''),COALESCE((SELECT MAX(created_at) FROM jobs j WHERE j.workspace_id=w.id),''),COALESCE((SELECT MAX(created_at) FROM expenses e WHERE e.workspace_id=w.id),''),COALESCE((SELECT MAX(created_at) FROM tasks t WHERE t.workspace_id=w.id),''),COALESCE((SELECT MAX(created_at) FROM ai_actions aa WHERE aa.workspace_id=w.id),''))";
+        $q=$this->db->query("SELECT w.id,w.name,w.status,w.created_at,s.status subscription_status,s.billing_interval,s.trial_ends_at,s.free_until,s.current_period_end,s.cancel_at_period_end,s.custom_monthly_price_czk,s.custom_yearly_price_czk,u.id owner_id,u.name owner_name,u.email owner_email,u.last_login_at,$activityExpr AS last_activity, (SELECT COUNT(*) FROM users ux WHERE ux.workspace_id=w.id) user_count, (SELECT COUNT(*) FROM documents dx WHERE dx.workspace_id=w.id) document_count FROM workspaces w LEFT JOIN subscriptions s ON s.workspace_id=w.id LEFT JOIN users u ON u.workspace_id=w.id AND u.role='owner' ORDER BY datetime(last_activity) DESC, w.id DESC");
+        $workspaces=$q->fetchAll();
+        $recent=$this->db->query("SELECT u.id,u.name,u.email,u.role,u.active,u.last_login_at,w.name workspace_name FROM users u JOIN workspaces w ON w.id=u.workspace_id ORDER BY datetime(COALESCE(u.last_login_at,u.created_at)) DESC LIMIT 12")->fetchAll();
+        $allUsers=$this->db->query("SELECT u.id,u.name,u.email,u.role,u.active,u.email_verified_at,u.last_login_at,u.created_at,w.name workspace_name,s.status subscription_status FROM users u JOIN workspaces w ON w.id=u.workspace_id LEFT JOIN subscriptions s ON s.workspace_id=w.id ORDER BY datetime(COALESCE(u.last_login_at,u.created_at)) DESC LIMIT 100")->fetchAll();
+        $settings=$this->saasSettings();
+        View::render('admin/index',['title'=>'Super Admin','stats'=>$stats,'workspaces'=>$workspaces,'recentUsers'=>$recent,'allUsers'=>$allUsers,'settings'=>$settings,'isSuperAdmin'=>true]);
+    }
+    public function adminUserToggle(int $id):void{
+        $this->requireSuperAdmin(); Auth::verifyCsrf();
+        $s=$this->db->prepare('SELECT id,workspace_id,role,active FROM users WHERE id=?');$s->execute([$id]);$u=$s->fetch();if(!$u)Response::abort(404,'Uživatel nenalezen.');
+        if((int)$u['id']===Auth::id())Response::abort(422,'Vlastní Super Admin účet nelze deaktivovat.');
+        $new=(int)$u['active']?0:1;$this->db->prepare('UPDATE users SET active=? WHERE id=?')->execute([$new,$id]);
+        Response::redirect('/admin?focus=users');
+    }
+    public function adminUserRole(int $id):void{
+        $this->requireSuperAdmin(); Auth::verifyCsrf();
+        $role=(string)($_POST['role']??'employee'); if(!in_array($role,['owner','admin','accountant','employee'],true))Response::abort(422,'Neplatná role.');
+        $s=$this->db->prepare('SELECT id FROM users WHERE id=?');$s->execute([$id]);if(!$s->fetch())Response::abort(404,'Uživatel nenalezen.');
+        $this->db->prepare('UPDATE users SET role=? WHERE id=?')->execute([$role,$id]);Response::redirect('/admin?focus=users');
+    }
+    public function adminSubscriptionSave(int $workspaceId):void{
+        $this->requireSuperAdmin(); Auth::verifyCsrf(); $this->ensureSuperAdminSchema();
+        $status=(string)($_POST['status']??'trial');$allowed=['trial','active','free','suspended','cancelled'];if(!in_array($status,$allowed,true))Response::abort(422,'Neplatný stav předplatného.');
+        $interval=(string)($_POST['billing_interval']??'month');if(!in_array($interval,['month','year'],true))$interval='month';
+        $free=trim((string)($_POST['free_until']??''));$trial=trim((string)($_POST['trial_ends_at']??''));$end=trim((string)($_POST['current_period_end']??''));
+        $cm=trim((string)($_POST['custom_monthly_price_czk']??''));$cy=trim((string)($_POST['custom_yearly_price_czk']??''));
+        $cm=$cm===''?null:max(0,(float)str_replace(',','.',$cm));$cy=$cy===''?null:max(0,(float)str_replace(',','.',$cy));
+        $s=$this->db->prepare('SELECT id FROM subscriptions WHERE workspace_id=?');$s->execute([$workspaceId]);if(!$s->fetch()){
+            $this->db->prepare('INSERT INTO subscriptions(workspace_id,plan,status,billing_interval,trial_ends_at,free_until,current_period_end,custom_monthly_price_czk,custom_yearly_price_czk) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$workspaceId,'all',$status,$interval,$trial?:null,$free?:null,$end?:null,$cm,$cy]);
+        } else {
+            $this->db->prepare('UPDATE subscriptions SET status=?,billing_interval=?,trial_ends_at=?,free_until=?,current_period_end=?,custom_monthly_price_czk=?,custom_yearly_price_czk=?,updated_at=CURRENT_TIMESTAMP WHERE workspace_id=?')->execute([$status,$interval,$trial?:null,$free?:null,$end?:null,$cm,$cy,$workspaceId]);
+        }
+        $this->db->prepare('UPDATE workspaces SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$status==='suspended'?'suspended':($status==='cancelled'?'cancelled':'active'),$workspaceId]);
+        Response::redirect('/admin?focus=subscription-'.$workspaceId);
+    }
+    public function adminUserDetail(int $id):void{
+        $this->requireSuperAdmin();
+        $s=$this->db->prepare('SELECT u.id,u.name,u.email,u.role,u.active,u.email_verified_at,u.last_login_at,u.created_at,w.id workspace_id,w.name workspace_name,s.status subscription_status,s.billing_interval,s.trial_ends_at,s.free_until,s.current_period_end,s.cancel_at_period_end,s.custom_monthly_price_czk,s.custom_yearly_price_czk FROM users u JOIN workspaces w ON w.id=u.workspace_id LEFT JOIN subscriptions s ON s.workspace_id=w.id WHERE u.id=?');$s->execute([$id]);$user=$s->fetch();if(!$user)Response::abort(404,'Uživatel nenalezen.');
+        $q=$this->db->prepare("SELECT 'faktury' metric,COUNT(*) value FROM documents WHERE workspace_id=? UNION ALL SELECT 'zákazníci',COUNT(*) FROM customers WHERE workspace_id=? UNION ALL SELECT 'úkoly',COUNT(*) FROM tasks WHERE workspace_id=? UNION ALL SELECT 'AI akce',COUNT(*) FROM ai_actions WHERE workspace_id=?");$q->execute([$user['workspace_id'],$user['workspace_id'],$user['workspace_id'],$user['workspace_id']]);$usage=$q->fetchAll();
+        View::render('admin/user-detail',['title'=>'Správa účtu','user'=>$user,'usage'=>$usage]);
+    }
+    public function adminHealth():void{
+        $this->requireSuperAdmin();
+        $root=dirname(__DIR__,2);$dbFile=(string)Env::get('DB_PATH',$root.'/database/app.sqlite');$dbFile=$dbFile!==''?$dbFile:$root.'/database/app.sqlite';
+        $checks=[
+            ['name'=>'PHP','value'=>PHP_VERSION,'ok'=>version_compare(PHP_VERSION,'8.2','>=')],
+            ['name'=>'SQLite','value'=>extension_loaded('pdo_sqlite')?'OK':'Chybí','ok'=>extension_loaded('pdo_sqlite')],
+            ['name'=>'OpenSSL','value'=>extension_loaded('openssl')?'OK':'Chybí','ok'=>extension_loaded('openssl')],
+            ['name'=>'DomPDF','value'=>class_exists('Dompdf\\Dompdf')?'OK':'Chybí','ok'=>class_exists('Dompdf\\Dompdf')],
+            ['name'=>'QR','value'=>class_exists('Endroid\\QrCode\\Builder\\Builder')?'OK':'Chybí','ok'=>class_exists('Endroid\\QrCode\\Builder\\Builder')],
+            ['name'=>'Databáze','value'=>is_file($dbFile)?number_format(filesize($dbFile)/1048576,2,',',' ').' MB':'Nenalezena','ok'=>is_file($dbFile)],
+            ['name'=>'Disk','value'=>number_format(disk_free_space($root)/1073741824,2,',',' ').' GB volno','ok'=>disk_free_space($root)>1073741824],
+            ['name'=>'AI','value'=>Env::get('AI_API_KEY','')!==''?'Nastaveno':'Nenastaveno','ok'=>Env::get('AI_API_KEY','')!==''||Env::get('AI_PROVIDER','')==='none'],
+            ['name'=>'GoPay','value'=>Env::get('GOPAY_SAAS_CLIENT_ID','')!==''?'Nastaveno':'Nenastaveno','ok'=>Env::get('GOPAY_SAAS_CLIENT_ID','')!==''||Env::get('GOPAY_BASE_URL','')===''],
+            ['name'=>'SMTP / Mail','value'=>Env::get('MAIL_FROM','')!==''?'Nastaveno':'Nenastaveno','ok'=>Env::get('MAIL_FROM','')!==''||Env::get('SENDMAIL_PATH','')!=='' ],
+            ['name'=>'Zálohy','value'=>is_dir($root.'/storage/backups')?'Připraveno':'Chybí složka','ok'=>is_dir($root.'/storage/backups')],
+        ];
+        View::render('admin/system',['title'=>'Systém a zdraví','checks'=>$checks,'settings'=>$this->saasSettings(),'last_automatic_backup_at'=>($this->db->query('SELECT last_automatic_backup_at FROM saas_settings WHERE id=1')->fetchColumn()?:null)]);
+    }
     public function subscription():void{
         Auth::requireRole(['owner','admin']); Auth::verifyCsrf();
         $interval=$_POST['interval']??'month'; if(!in_array($interval,['month','year'],true))Response::abort(422,'Neplatné období předplatného.');

@@ -33,7 +33,7 @@
         if($name==='') $name='Bez názvu';
       ?>
         <tr>
-          <td data-label="Zákazník"><a class="customer-name" href="/customers/<?=$c['id']?>"><b><?=\App\Core\View::e($name)?></b></a></td>
+          <td data-label="Zákazník"><a class="customer-name" href="/customers/<?=$c['id']?>"><b><?=\App\Core\View::e($name)?></b></a><?php if((int)($c['active']??1)!==1): ?><span class="customer-archived">Archivovaný</span><?php endif; ?></td>
           <td data-label="IČO"><?=\App\Core\View::e($c['ico'])?></td>
           <td data-label="E-mail"><?=\App\Core\View::e($c['email'])?></td>
           <td data-label="Telefon"><?=\App\Core\View::e($c['phone'])?></td>
@@ -58,6 +58,7 @@
 .customer-table th:first-child,.customer-table td:first-child{padding-left:20px}
 .customer-table th:last-child,.customer-table td:last-child{padding-right:20px}
 .customer-name{color:var(--text)}
+.customer-archived{display:inline-block;margin-left:8px;padding:3px 7px;border-radius:999px;background:#fff4e5;color:#9a5b00;font-size:10px;font-weight:800;vertical-align:middle}
 .customer-name:hover{color:var(--blue)}
 .customer-actions{text-align:right!important;white-space:nowrap}
 .customer-empty{display:grid;justify-items:center;text-align:center;gap:10px;padding:54px 22px}

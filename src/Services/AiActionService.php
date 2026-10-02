@@ -155,13 +155,18 @@ final class AiActionService
             $body=$reminder['body'];
             $days=(int)$reminder['days'];
             $from=((int)($d['mail_enabled']??1) && !empty($d['email_localpart']) && $domain!=='') ? trim((string)$d['email_localpart']).'@'.$domain : null;
-            $ok=MailerService::send($email,$subject,$body,null,$from,$d['workspace_name'],null,$d['logo_path']??null,$wid,$from);
+            $iq=$db->prepare('SELECT * FROM document_items WHERE document_id=? ORDER BY id');$iq->execute([(int)$d['id']]);$items=$iq->fetchAll();
+            $pdf=PdfService::invoice($d,$items,['name'=>$d['workspace_name'],'logo_path'=>$d['logo_path']??null],$d,$d['doc_type']==='invoice'?$url.'/qr':null);
+            $dir=dirname(__DIR__,2).'/storage/mail';if(!is_dir($dir))@mkdir($dir,0775,true);$attachment=$dir.'/'.$wid.'_'.(int)$d['id'].'_reminder_'.date('YmdHis').'.pdf';if(file_put_contents($attachment,$pdf)===false)throw new \RuntimeException('Přílohu faktury se nepodařilo připravit.');
+            $reminderData=['company'=>$d['workspace_name'],'title'=>$subject,'intro'=>"Dobrý den, ".$name.",\n\n".$body,'action_url'=>$url,'action_text'=>'Otevřít doklad','details'=>['Doklad'=>$d['doc_number'],'Částka'=>number_format((float)$d['total_with_vat'],2,',',' ').' Kč','Splatnost'=>(string)$d['due_date']]];
+            $render=['html'=>EmailTemplateService::fragment('reminder',$reminderData),'text'=>"Dobrý den, ".$name.",\n\n".$body."\n\nDoklad: ".$d['doc_number']."\nČástka: ".number_format((float)$d['total_with_vat'],2,',',' ')." Kč\nSplatnost: ".$d['due_date']."\n\nOtevřít doklad: ".$url."\n\nS pozdravem,\n".$d['workspace_name']];
+            $ok=MailerService::sendReport($email,$subject,$render['text'],$render['html'],$from,$d['workspace_name'],null,$d['logo_path']??null,$wid,$from,$attachment);
             if(!$ok)throw new \RuntimeException('E-mail se nepodařilo odeslat: '.MailerService::lastError());
             $db->prepare('INSERT INTO email_messages(workspace_id,customer_id,document_id,direction,from_email,to_email,subject,body,html_body) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$wid,$d['customer_id']?:null,$d['id'],'outbound',$from,$email,$subject,$body,null]);
             $db->prepare('INSERT OR IGNORE INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)')->execute([$wid,$d['id'],$days]);
             return ['message'=>'Upomínka k '.$d['doc_number'].' byla skutečně odeslána na '.$email.'.','entity'=>'document','id'=>(int)$d['id']];
         } else {$subject='Faktura '.$d['doc_number'];$intro='v příloze / odkazu zasíláme fakturu '.$d['doc_number'].' ve výši '.number_format((float)$d['total_with_vat'],2,',',' ').' Kč.';$type='invoice';$title='Faktura '.$d['doc_number'];
-        $render=EmailTemplateService::render($type,['company'=>$d['workspace_name'],'logo'=>$base.'/assets/byznio-email-logo.png','title'=>$title,'intro'=>"Dobrý den, ".$name.",\n\n".$intro,'action_url'=>$url,'action_text'=>'Otevřít doklad','details'=>['Doklad'=>$d['doc_number'],'Částka'=>number_format((float)$d['total_with_vat'],2,',',' ').' Kč','Splatnost'=>(string)$d['due_date']]]);
+        $render=['html'=>EmailTemplateService::fragment($type,['company'=>$d['workspace_name'],'title'=>$title,'intro'=>"Dobrý den, ".$name.",\n\n".$intro,'action_url'=>$url,'action_text'=>'Otevřít doklad','details'=>['Doklad'=>$d['doc_number'],'Částka'=>number_format((float)$d['total_with_vat'],2,',',' ').' Kč','Splatnost'=>(string)$d['due_date']]]), 'text'=>"Dobrý den, ".$name.",\n\n".$intro."\n\nDoklad: ".$d['doc_number']."\nČástka: ".number_format((float)$d['total_with_vat'],2,',',' ')." Kč\nSplatnost: ".$d['due_date']."\n\nOtevřít doklad: ".$url."\n\nS pozdravem,\n".$d['workspace_name']];
         $from=((int)($d['mail_enabled']??1) && !empty($d['email_localpart']) && $domain!=='') ? trim((string)$d['email_localpart']).'@'.$domain : null;
         $attachment=null;
         if(!$reminder){
@@ -169,7 +174,7 @@ final class AiActionService
             $pdf=PdfService::invoice($d,$items,['name'=>$d['workspace_name'],'logo_path'=>$d['logo_path']??null],$d,$d['doc_type']==='invoice'?$url.'/qr':null);
             $dir=dirname(__DIR__,2).'/storage/mail';if(!is_dir($dir))@mkdir($dir,0775,true);$attachment=$dir.'/'.$wid.'_'.(int)$d['id'].'_'.date('YmdHis').'.pdf';if(file_put_contents($attachment,$pdf)===false)throw new \RuntimeException('PDF dokladu se nepodařilo připravit.');
         }
-        $ok=MailerService::sendReport($email,$subject,$render['text'],$render['html'],$from,$d['workspace_name'],null,$d['logo_path']??null,$wid,$from);
+        $ok=MailerService::sendReport($email,$subject,$render['text'],$render['html'],$from,$d['workspace_name'],null,$d['logo_path']??null,$wid,$from,$attachment);
         if(!$ok)throw new \RuntimeException('E-mail se nepodařilo odeslat: '.MailerService::lastError());
         $db->prepare('INSERT INTO email_messages(workspace_id,customer_id,document_id,direction,from_email,to_email,subject,body,html_body) VALUES(?,?,?,?,?,?,?,?,?)')->execute([$wid,$d['customer_id']?:null,$d['id'],'outbound',$from,$email,$subject,$render['text'],MailerService::htmlForLog($render['text'],$d['workspace_name'],null,$d['logo_path']??null,$wid)]);
         if($reminder)$db->prepare('INSERT OR IGNORE INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)')->execute([$wid,$d['id'],(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400)]);

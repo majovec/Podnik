@@ -84,17 +84,21 @@ foreach($pending as $ri){
 // Payment statuses.
 $pdo->exec("UPDATE documents SET payment_status='overdue' WHERE doc_type IN ('invoice','proforma') AND payment_status='unpaid' AND due_date<date('now')");
 // Scheduled invoice reminders with deduplication.
-$docs=$pdo->query("SELECT d.*,c.email,w.mail_enabled,w.mail_reminders FROM documents d LEFT JOIN customers c ON c.id=d.customer_id JOIN workspaces w ON w.id=d.workspace_id WHERE d.doc_type='invoice' AND d.payment_status!='paid' AND c.email IS NOT NULL")->fetchAll();
+$docs=$pdo->query("SELECT d.*,c.email,w.name workspace_name,w.logo_path,w.mail_enabled,w.mail_reminders FROM documents d LEFT JOIN customers c ON c.id=d.customer_id JOIN workspaces w ON w.id=d.workspace_id WHERE d.doc_type='invoice' AND d.payment_status!='paid' AND c.email IS NOT NULL")->fetchAll();
 foreach($docs as $d){
     $days=(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400);
     if(!in_array($days,[3,7],true)||empty($d['mail_enabled'])||empty($d['mail_reminders'])) continue;
     $q=$pdo->prepare('INSERT OR IGNORE INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)');
     $q->execute([$d['workspace_id'],$d['id'],$days]);
     if(!$q->rowCount()) continue;
-    $subject=$days<0?'Blíží se splatnost '.$d['doc_number']:'Upomínka '.$d['doc_number'];
-    $text=$days<0?'před splatností':'po splatnosti '.$days.' dní';
-    $body='Faktura '.$d['doc_number'].' ve výši '.number_format((float)$d['total_with_vat'],2,',',' ').' Kč je '.$text.'.';
-    $pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$d['workspace_id'],$d['email'],$subject,$body,null,'queued']);
+    $reminder=ReminderService::content($d);
+    $subject=$reminder['subject'];
+    $body=$reminder['body'];
+    $itemsQ=$pdo->prepare('SELECT * FROM document_items WHERE document_id=? ORDER BY id');$itemsQ->execute([(int)$d['id']]);$items=$itemsQ->fetchAll();
+    $base=rtrim((string)Env::get('APP_URL',''),'/');$url=$base.'/d/'.(string)$d['public_token'];
+    $pdf=PdfService::invoice($d,$items,['name'=>$d['workspace_name']??'Byznio','logo_path'=>$d['logo_path']??null],$d,$d['doc_type']==='invoice'?$url.'/qr':null);
+    $dir=dirname(__DIR__).'/storage/mail';if(!is_dir($dir))@mkdir($dir,0775,true);$attachment=$dir.'/auto_reminder_'.$d['workspace_id'].'_'.(int)$d['id'].'_'.date('YmdHis').'.pdf';if(file_put_contents($attachment,$pdf)===false){error_log('Reminder PDF failed for document '.$d['id']);continue;}
+    $pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,attachment_path,action_url,status) VALUES(?,?,?,?,?,?,?)')->execute([$d['workspace_id'],$d['email'],$subject,$body,$attachment,null,'queued']);
 }
 // Rule-based automations.
 $rules=$pdo->query("SELECT * FROM automation_rules WHERE active=1")->fetchAll();

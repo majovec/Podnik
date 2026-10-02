@@ -207,7 +207,8 @@ final class MailerService {
         ?string $actionUrl = null,
         ?string $logoPath = null,
         ?int $workspaceId = null,
-        ?string $replyTo = null
+        ?string $replyTo = null,
+        ?string $attachment = null
     ): bool {
         $name = $name ?: Env::get('MAIL_FROM_NAME', 'Byznio');
         if ($replyTo) {
@@ -218,7 +219,7 @@ final class MailerService {
             $subject,
             $body,
             self::reportHtml($reportHtml, $name, $actionUrl, $logoPath, $workspaceId),
-            null,
+            $attachment,
             $from,
             $name
         );

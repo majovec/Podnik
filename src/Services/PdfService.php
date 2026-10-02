@@ -27,7 +27,7 @@ final class PdfService {
     private static function qrDataUri(string $data):?string{
         if(!class_exists(Builder::class))return null;
         try{
-            $result=(new Builder(writer:new PngWriter(),writerOptions:[],validateResult:false,data:$data,encoding:new Encoding('UTF-8'),errorCorrectionLevel:ErrorCorrectionLevel::High,size:300,margin:10,roundBlockSizeMode:RoundBlockSizeMode::Margin))->build();
+            $result=(new Builder(writer:new PngWriter(),writerOptions:[],validateResult:false,data:$data,encoding:new Encoding('UTF-8'),errorCorrectionLevel:ErrorCorrectionLevel::High,size:600,margin:14,roundBlockSizeMode:RoundBlockSizeMode::Margin))->build();
             return $result->getDataUri();
         }catch(\Throwable $e){ return null; }
     }
@@ -63,6 +63,6 @@ final class PdfService {
         <div class="smallnote"><strong>'.($lang==='en'?'VAT breakdown':'Rekapitulace DPH').'</strong>'.$vatRecap.'</div><table class="totals"><tr><td class="label">'.($lang==='en'?'Subtotal excl. VAT':'Mezisoučet bez DPH').'</td><td class="value">'.number_format((float)$doc['total_without_vat'],2,',',' ').' Kč</td></tr><tr><td class="label">'.($lang==='en'?'VAT':'DPH').'</td><td class="value">'.number_format((float)$doc['total_vat'],2,',',' ').' Kč</td></tr><tr class="grand"><td class="label">'.($lang==='en'?'Amount due':'K úhradě').'</td><td class="value">'.number_format((float)$doc['total_with_vat'],2,',',' ').' Kč</td></tr></table>
         '.($bankBlock!==''?'<div class="paywrap"><table class="payrow"><tr><td>'.$bankBlock.'</td><td style="width:170px">'.$qrHtml.'</td></tr></table></div>':'').'
         <div class="footer"><strong>'.$companyName.'</strong> · Doklad vytvořen systémem Byznio · '.$esc($company['email']??'').' '.(!empty($company['phone'])?'· '.$esc($company['phone']):'').'</div></div></body></html>';
-        $o=new Options();$o->set('defaultFont','DejaVu Sans');$o->set('isRemoteEnabled',false);$o->set('isHtml5ParserEnabled',true);$d=new Dompdf($o);$d->loadHtml($html,'UTF-8');$d->setPaper('A4');$d->render();return $d->output();
+        $o=new Options();$o->set('defaultFont','DejaVu Sans');$o->setDpi(150);$o->set('isRemoteEnabled',false);$o->set('isHtml5ParserEnabled',true);$d=new Dompdf($o);$d->loadHtml($html,'UTF-8');$d->setPaper('A4');$d->render();return $d->output();
     }
 }

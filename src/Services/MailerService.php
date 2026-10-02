@@ -22,7 +22,9 @@ final class MailerService {
             $logo = $appUrl . '/mail/logo/' . (int)$workspaceId . '?token=' . $token;
         }
 
-        $button = $actionUrl
+        // Customer-facing workspace e-mails must not contain the "Otevřít v Byzniu" CTA.
+        // Account/system messages (without workspace context) may still use an action button.
+        $button = ($actionUrl && $workspaceId === null)
             ? '<p style="margin:28px 0"><a href="' . htmlspecialchars($actionUrl, ENT_QUOTES, 'UTF-8') . '" style="display:inline-block;padding:12px 20px;background:#1677ee;color:#fff;text-decoration:none;border-radius:10px;font-weight:700">Otevřít v Byzniu</a></p>'
             : '';
 

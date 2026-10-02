@@ -63,7 +63,7 @@ foreach($rows as $r){try{$id=DocumentService::createFromTemplate($pdo,$r);$inter
                 ? $currentDate->modify('+'.$intervalValue.' years')
                 : $currentDate->modify('+'.$months.' months');
         }
-        $pdo->prepare('UPDATE recurring_invoices SET next_run=? WHERE id=?')->execute([$nextDate->format('Y-m-d'),$r['id']]);if($id&&$r['send_email']){ $s=$pdo->prepare('SELECT email FROM customers WHERE id=? AND workspace_id=?');$s->execute([$r['customer_id'],$r['workspace_id']]);$email=$s->fetchColumn();if($email){$tk=$pdo->prepare('SELECT public_token,doc_number FROM documents WHERE id=? AND workspace_id=?');$tk->execute([$id,$r['workspace_id']]);$doc=$tk->fetch();if($doc)$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$r['workspace_id'],$email,'Nová faktura','Byla vytvořena nová pravidelná faktura č. '.$doc['doc_number'],rtrim(Env::get('APP_URL',''),'/').'/d/'.$doc['public_token'],'queued']);}}}catch(Throwable $e){error_log($e->getMessage());}}
+        $pdo->prepare('UPDATE recurring_invoices SET next_run=? WHERE id=?')->execute([$nextDate->format('Y-m-d'),$r['id']]);if($id&&$r['send_email']){ $s=$pdo->prepare('SELECT email FROM customers WHERE id=? AND workspace_id=?');$s->execute([$r['customer_id'],$r['workspace_id']]);$email=$s->fetchColumn();if($email){$tk=$pdo->prepare('SELECT public_token,doc_number FROM documents WHERE id=? AND workspace_id=?');$tk->execute([$id,$r['workspace_id']]);$doc=$tk->fetch();if($doc)$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$r['workspace_id'],$email,'Nová faktura','Byla vytvořena nová pravidelná faktura č. '.$doc['doc_number'],null,'queued']);}}}catch(Throwable $e){error_log($e->getMessage());}}
 // Background OCR for received invoices imported by email. The webhook stays fast; OCR runs here.
 $pending=$pdo->query("SELECT id,attachment_path FROM received_invoices WHERE ocr_status='pending' AND attachment_path IS NOT NULL ORDER BY id LIMIT 20")->fetchAll();
 foreach($pending as $ri){
@@ -87,14 +87,14 @@ $pdo->exec("UPDATE documents SET payment_status='overdue' WHERE doc_type IN ('in
 $docs=$pdo->query("SELECT d.*,c.email,w.mail_enabled,w.mail_reminders FROM documents d LEFT JOIN customers c ON c.id=d.customer_id JOIN workspaces w ON w.id=d.workspace_id WHERE d.doc_type='invoice' AND d.payment_status!='paid' AND c.email IS NOT NULL")->fetchAll();
 foreach($docs as $d){
     $days=(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400);
-    if(!in_array($days,[-3,0,3,7],true)||empty($d['mail_enabled'])||empty($d['mail_reminders'])) continue;
+    if(!in_array($days,[3,7],true)||empty($d['mail_enabled'])||empty($d['mail_reminders'])) continue;
     $q=$pdo->prepare('INSERT OR IGNORE INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)');
     $q->execute([$d['workspace_id'],$d['id'],$days]);
     if(!$q->rowCount()) continue;
     $subject=$days<0?'Blíží se splatnost '.$d['doc_number']:'Upomínka '.$d['doc_number'];
     $text=$days<0?'před splatností':'po splatnosti '.$days.' dní';
     $body='Faktura '.$d['doc_number'].' ve výši '.number_format((float)$d['total_with_vat'],2,',',' ').' Kč je '.$text.'.';
-    $pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$d['workspace_id'],$d['email'],$subject,$body,rtrim(Env::get('APP_URL',''),'/').'/d/'.$d['public_token'],'queued']);
+    $pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$d['workspace_id'],$d['email'],$subject,$body,null,'queued']);
 }
 // Rule-based automations.
 $rules=$pdo->query("SELECT * FROM automation_rules WHERE active=1")->fetchAll();
@@ -115,7 +115,7 @@ foreach($rules as $rule){
             $message='Rozpočty zkontrolovány; vytvořeno '.$created.' úkolů.';
         } elseif($trigger==='invoice_due' && $action==='send_reminder'){
             $cfg=json_decode((string)$rule['config_json'],true)?:[];$days=(int)($cfg['days']??0);$docs=$pdo->prepare('SELECT d.*,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.workspace_id=? AND d.doc_type="invoice" AND d.payment_status!="paid" AND c.email IS NOT NULL AND d.due_date IS NOT NULL');$docs->execute([$wid]);$queued=0;
-            foreach($docs as $d){$diff=(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400);if(abs($diff)!==$days && !($days===0&&$diff===0))continue;$ded=$pdo->prepare('SELECT COUNT(*) FROM reminder_log WHERE workspace_id=? AND document_id=? AND days_offset=?');$ded->execute([$wid,$d['id'],$diff]);if((int)$ded->fetchColumn())continue;$pdo->prepare('INSERT INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)')->execute([$wid,$d['id'],$diff]);$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$wid,$d['email'],'Upomínka k faktuře '.$d['doc_number'],'Faktura '.$d['doc_number'].' je '.$diff.' dní po splatnosti.',rtrim(Env::get('APP_URL',''),'/').'/d/'.$d['public_token'],'queued']);$queued++;}
+            foreach($docs as $d){$diff=(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400);if($diff<=0)continue;if(abs($diff)!==$days)continue;$ded=$pdo->prepare('SELECT COUNT(*) FROM reminder_log WHERE workspace_id=? AND document_id=? AND days_offset=?');$ded->execute([$wid,$d['id'],$diff]);if((int)$ded->fetchColumn())continue;$pdo->prepare('INSERT INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)')->execute([$wid,$d['id'],$diff]);$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$wid,$d['email'],'Upomínka k faktuře '.$d['doc_number'],'Faktura '.$d['doc_number'].' je '.$diff.' dní po splatnosti.',null,'queued']);$queued++;}
             $message='Připraveno '.$queued.' upomínek.';
         } else { $message='Pravidlo je uloženo; pro tuto kombinaci zatím není automatická akce implementována.'; }
         $pdo->prepare('INSERT INTO automation_runs(workspace_id,rule_id,status,message) VALUES(?,?,?,?)')->execute([$wid,$rule['id'],'ok',$message]);

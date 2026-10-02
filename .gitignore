@@ -1,0 +1,14 @@
+# Local secrets and runtime data
+.env
+.env.*
+!.env.example
+
+# Dependencies / generated runtime files
+/vendor/
+/storage/
+/public/uploads/
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/

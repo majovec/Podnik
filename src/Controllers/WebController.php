@@ -1,10 +1,30 @@
 <?php
 namespace App\Controllers;
 use PDO;
+use Endroid\QrCode\Builder\Builder;
+use Endroid\QrCode\Encoding\Encoding;
+use Endroid\QrCode\ErrorCorrectionLevel;
+use Endroid\QrCode\RoundBlockSizeMode;
+use Endroid\QrCode\Writer\PngWriter;
 use App\Core\{Auth,View,Response,Env};
 use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService,BankCsvParser,AccountingExportService,EmailTemplateService,CnbRateService,InboundMailService,MailboxService};
 final class WebController {
     public function __construct(private PDO $db){}
+    private function qrPng(string $data,int $size=360,int $margin=10):array {
+        if(!class_exists(Builder::class)) throw new \RuntimeException('QR knihovna není nainstalována. Spusťte composer install.');
+        $result=(new Builder(
+            writer:new PngWriter(),
+            writerOptions:[],
+            validateResult:false,
+            data:$data,
+            encoding:new Encoding('UTF-8'),
+            errorCorrectionLevel:ErrorCorrectionLevel::High,
+            size:$size,
+            margin:$margin,
+            roundBlockSizeMode:RoundBlockSizeMode::Margin
+        ))->build();
+        return [$result->getMimeType(),$result->getString()];
+    }
     private function scope(string $sql,array $params=[]):array{$s=$this->db->prepare($sql);$s->execute([Auth::workspaceId(),...$params]);return $s->fetchAll();}
     private function isSuperAdmin():bool{ $emails=array_filter(array_map('trim',explode(',',(string)Env::get('SUPER_ADMIN_EMAILS','')))); return in_array(strtolower((string)(Auth::user()['email']??'')),array_map('strtolower',$emails),true); }
     public function landing():void{ if(Auth::check()) { Response::redirect('/'); } View::render('landing',['title'=>'Byznio','settings'=>$this->saasSettings()]); }
@@ -325,9 +345,10 @@ final class WebController {
         $iban=$this->normalizeIban((string)$d['bank_account']);
         if(!$iban) Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
         $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
-        if(!class_exists('Endroid\QrCode\QrCode')) Response::abort(500,'QR knihovna není nainstalována.');
-        $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(520)->setMargin(14);$result=(new \Endroid\QrCode\Writer\PngWriter())->write($qr);
-        header('Content-Type: '.$result->getMimeType());header('Cache-Control: public, max-age=3600');echo $result->getString();exit;
+        try{
+            [$mime,$png]=$this->qrPng($spayd,520,14);
+            header('Content-Type: '.$mime);header('Cache-Control: public, max-age=3600');echo $png;exit;
+        }catch(\Throwable $e){ Response::abort(502,'QR platbu se nepodařilo připravit: '.$e->getMessage()); }
     }
 
     public function publicPay(string $token):void{
@@ -336,9 +357,8 @@ final class WebController {
         try{if(GoPayService::isConnected((int)$d['workspace_id'])){$this->createPublicGoPay($d,$token);return;}
             $iban=$this->normalizeIban((string)$d['bank_account']);if(!$iban)Response::abort(422,'Firma nemá nastavený platný bankovní účet pro QR platbu.');
             $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
-            if(!class_exists('Endroid\QrCode\QrCode'))Response::abort(500,'QR knihovna není nainstalována.');
-            $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(360)->setMargin(10);$result=(new \Endroid\QrCode\Writer\PngWriter())->write($qr);
-            header('Content-Type: '.$result->getMimeType());header('Content-Disposition: inline; filename="qr-'.$d['doc_number'].'.png"');echo $result->getString();exit;
+            [$mime,$png]=$this->qrPng($spayd,360,10);
+            header('Content-Type: '.$mime);header('Content-Disposition: inline; filename="qr-'.$d['doc_number'].'.png"');echo $png;exit;
         }catch(\Throwable $e){Response::abort(502,'Platbu se nepodařilo připravit: '.$e->getMessage());}
     }
     public function pdf(int $id):void{Auth::require();$s=$this->db->prepare('SELECT d.*,c.company_name,c.first_name,c.last_name,c.street,c.city,c.zip,c.ico,c.dic FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen');$s=$this->db->prepare('SELECT * FROM document_items WHERE document_id=?');$s->execute([$id]);$items=$s->fetchAll();$company=$this->company();$pdf=PdfService::invoice($d,$items,$company,$d,rtrim(Env::get('APP_URL',''),'/').'/d/'.$d['public_token'].'/qr');header('Content-Type: application/pdf');header('Content-Disposition: inline; filename="'.$d['doc_number'].'.pdf"');echo $pdf;exit;}
@@ -709,10 +729,10 @@ final class WebController {
         $iban=$this->normalizeIban((string)$d['bank_account']);
         if(!$iban) Response::abort(422,'Ve firmě není nastaven platný IBAN ani český účet ve formátu číslo/kód banky.');
         $spayd='SPD*1.0*ACC:'.$iban.'*AM:'.number_format((float)$d['total_with_vat'],2,'.','').'*CC:CZK*X-VS:'.$d['variable_symbol'];
-        if(!class_exists('Endroid\QrCode\QrCode')) Response::abort(500,'QR knihovna není nainstalována. Spusťte composer install.');
-        $qr=\Endroid\QrCode\QrCode::create($spayd)->setSize(360)->setMargin(10);
-        $writer=new \Endroid\QrCode\Writer\PngWriter(); $result=$writer->write($qr);
-        header('Content-Type: '.$result->getMimeType()); echo $result->getString(); exit;
+        try{
+            [$mime,$png]=$this->qrPng($spayd,360,10);
+            header('Content-Type: '.$mime); echo $png; exit;
+        }catch(\Throwable $e){ Response::abort(502,'QR platbu se nepodařilo připravit: '.$e->getMessage()); }
     }
 
     public function goPayLink(int $id):void{

@@ -17,6 +17,9 @@ final class Database {
     private static function migrate(): void {
         $sql=file_get_contents(dirname(__DIR__,2).'/database/schema.sql');
         self::$pdo->exec($sql);
+        // Legacy customer rows from older installations could have a NULL active flag.
+        // Treat those rows as active so they remain visible in CRM after an update.
+        self::$pdo->exec("UPDATE customers SET active=1 WHERE active IS NULL");
         // Forward-compatible migrations for existing installations.
         $cols=self::$pdo->query("PRAGMA table_info(tax_profiles)")->fetchAll();
         $names=array_column($cols,'name');

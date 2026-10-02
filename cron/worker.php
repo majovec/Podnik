@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__).'/vendor/autoload.php';require dirname(__DIR__).'/src/bootstrap.php';
-use App\Core\{Database,Env};use App\Services\{MatcherService,DocumentService,MailerService,FioService,SaltEdgeService,BankTokenService,BackupService,OcrService};
+use App\Core\{Database,Env};use App\Services\{MatcherService,DocumentService,MailerService,FioService,SaltEdgeService,BankTokenService,BackupService,OcrService,ReminderService};
 $pdo=Database::pdo();
 // Bank sync: only explicitly connected accounts; Fio token is read-only by design.
 // Salt Edge sync: each workspace has its own Salt Edge customer/connection.
@@ -115,7 +115,7 @@ foreach($rules as $rule){
             $message='Rozpočty zkontrolovány; vytvořeno '.$created.' úkolů.';
         } elseif($trigger==='invoice_due' && $action==='send_reminder'){
             $cfg=json_decode((string)$rule['config_json'],true)?:[];$days=(int)($cfg['days']??0);$docs=$pdo->prepare('SELECT d.*,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.workspace_id=? AND d.doc_type="invoice" AND d.payment_status!="paid" AND c.email IS NOT NULL AND d.due_date IS NOT NULL');$docs->execute([$wid]);$queued=0;
-            foreach($docs as $d){$diff=(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400);if($diff<=0)continue;if(abs($diff)!==$days)continue;$ded=$pdo->prepare('SELECT COUNT(*) FROM reminder_log WHERE workspace_id=? AND document_id=? AND days_offset=?');$ded->execute([$wid,$d['id'],$diff]);if((int)$ded->fetchColumn())continue;$pdo->prepare('INSERT INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)')->execute([$wid,$d['id'],$diff]);$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$wid,$d['email'],'Upomínka k faktuře '.$d['doc_number'],'Faktura '.$d['doc_number'].' je '.$diff.' dní po splatnosti.',null,'queued']);$queued++;}
+            foreach($docs as $d){$diff=(int)floor((strtotime(date('Y-m-d'))-strtotime($d['due_date']))/86400);if($diff<=0)continue;if(abs($diff)!==$days)continue;$ded=$pdo->prepare('SELECT COUNT(*) FROM reminder_log WHERE workspace_id=? AND document_id=? AND days_offset=?');$ded->execute([$wid,$d['id'],$diff]);if((int)$ded->fetchColumn())continue;$pdo->prepare('INSERT INTO reminder_log(workspace_id,document_id,days_offset) VALUES(?,?,?)')->execute([$wid,$d['id'],$diff]);$reminder=ReminderService::content($d);$pdo->prepare('INSERT INTO email_queue(workspace_id,to_email,subject,body,action_url,status) VALUES(?,?,?,?,?,?)')->execute([$wid,$d['email'],$reminder['subject'],$reminder['body'],null,'queued']);$queued++;}
             $message='Připraveno '.$queued.' upomínek.';
         } else { $message='Pravidlo je uloženo; pro tuto kombinaci zatím není automatická akce implementována.'; }
         $pdo->prepare('INSERT INTO automation_runs(workspace_id,rule_id,status,message) VALUES(?,?,?,?)')->execute([$wid,$rule['id'],'ok',$message]);

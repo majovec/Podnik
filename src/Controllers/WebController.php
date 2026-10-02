@@ -162,7 +162,7 @@ final class WebController {
     }
     public function customerSave():void{Auth::require();Auth::verifyCsrf();$d=$_POST;if(!empty($d['ico']) && !empty($_POST['ares'])){$a=AresService::lookup($d['ico']);if($a)$d=array_merge($d,$a);} $s=$this->db->prepare('INSERT INTO customers(workspace_id,type,company_name,first_name,last_name,ico,dic,street,city,zip,delivery_street,delivery_city,delivery_zip,email,phone,web,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');$s->execute([Auth::workspaceId(),$d['type']??'company',$d['company_name']??null,$d['first_name']??null,$d['last_name']??null,$d['ico']??null,$d['dic']??null,$d['street']??null,$d['city']??null,$d['zip']??null,$d['delivery_street']??null,$d['delivery_city']??null,$d['delivery_zip']??null,$d['email']??null,$d['phone']??null,$d['web']??null,$d['note']??null]);$id=(int)$this->db->lastInsertId();$this->audit('create','customer',$id,$d);Response::redirect('/customers');}
     private function customersList():array{$s=$this->db->prepare('SELECT id,company_name,first_name,last_name FROM customers WHERE workspace_id=? AND COALESCE(active,1)=1 ORDER BY company_name,last_name');$s->execute([Auth::workspaceId()]);return $s->fetchAll();}
-    public function documents():void{Auth::require();$type=$_GET['type']??'';$q=trim($_GET['q']??'');$sql='SELECT d.*,c.company_name,c.first_name,c.last_name,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.workspace_id=?';$p=[Auth::workspaceId()];if($type){$sql.=' AND d.doc_type=?';$p[]=$type;}if($q){$sql.=' AND (d.doc_number LIKE ? OR c.company_name LIKE ? OR c.last_name LIKE ?)';$l="%$q%";array_push($p,$l,$l,$l);}$sql.=' ORDER BY d.issue_date DESC,d.id DESC';$s=$this->db->prepare($sql);$s->execute($p);View::render('documents/index',['title'=>'Doklady','documents'=>$s->fetchAll(),'type'=>$type]);}
+    public function documents():void{Auth::require();$type=$_GET['type']??'';$q=trim($_GET['q']??'');$sql='SELECT d.*,c.company_name,c.first_name,c.last_name,c.email,COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.document_id=d.id AND p.workspace_id=d.workspace_id),0) paid_amount FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.workspace_id=?';$p=[Auth::workspaceId()];if($type){$sql.=' AND d.doc_type=?';$p[]=$type;}if($q){$sql.=' AND (d.doc_number LIKE ? OR c.company_name LIKE ? OR c.last_name LIKE ?)';$l="%$q%";array_push($p,$l,$l,$l);}$sql.=' ORDER BY d.issue_date DESC,d.id DESC';$s=$this->db->prepare($sql);$s->execute($p);View::render('documents/index',['title'=>'Doklady','documents'=>$s->fetchAll(),'type'=>$type]);}
     public function documentForm():void{Auth::require();$type=(string)($_GET['type']??'invoice');$allowed=['invoice','proforma','offer','order','credit','delivery'];if(!in_array($type,$allowed,true))$type='invoice';$tp=$this->db->prepare('SELECT * FROM tax_profiles WHERE workspace_id=?');$tp->execute([Auth::workspaceId()]);$tax=$tp->fetch()?:['vat_payer'=>0];View::render('documents/form',['title'=>'Nový doklad','customers'=>$this->customersList(),'products'=>$this->productsList(),'prefillDocType'=>$type,'vatPayer'=>!empty($tax['vat_payer']),'taxProfile'=>$tax]);}
     private function workspaceMailName(int $wid):string{$s=$this->db->prepare('SELECT mail_display_name,name FROM workspaces WHERE id=?');$s->execute([$wid]);$w=$s->fetch()?:[];return trim((string)($w['mail_display_name']?:$w['name']?:'Byznio'));}
     private function workspaceMailAddress(int $wid):?string{ $s=$this->db->prepare('SELECT email_localpart,mail_enabled FROM workspaces WHERE id=?');$s->execute([$wid]);$w=$s->fetch()?:[];$domain=trim((string)($this->saasSettings()['mail_domain']??''));if(empty($w['mail_enabled'])||empty($w['email_localpart'])||$domain==='')return null;return trim((string)$w['email_localpart']).'@'.$domain;}
@@ -306,7 +306,41 @@ final class WebController {
         Response::redirect('/documents');
     }
     private function nextNumber(string $type):int{$s=$this->db->prepare('SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type=?');$s->execute([Auth::workspaceId(),$type]);return (int)$s->fetchColumn()+1;}
-    public function markPaid(int $id):void{Auth::require();Auth::verifyCsrf();$s=$this->db->prepare('SELECT * FROM documents WHERE id=? AND workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen');$amount=(float)($_POST['amount']??$d['total_with_vat']);$this->db->prepare('INSERT INTO payments(workspace_id,document_id,amount,paid_at,method,source) VALUES(?,?,?,?,?,?)')->execute([Auth::workspaceId(),$id,$amount,date('Y-m-d'),'bank','manual']);$s=$this->db->prepare('SELECT COALESCE(SUM(amount),0) FROM payments WHERE document_id=?');$s->execute([$id]);$paid=(float)$s->fetchColumn();$status=$paid>=$d['total_with_vat']-0.01?'paid':'partially_paid';$this->db->prepare('UPDATE documents SET payment_status=? WHERE id=?')->execute([$status,$id]);if($status==='paid'){ $q=$this->db->prepare('SELECT d.doc_number,d.public_token,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');$q->execute([$id,Auth::workspaceId()]);$x=$q->fetch();if($x&&$x['email']&&$this->workspaceMail(Auth::workspaceId(),'receipt'))$this->queueEmail(Auth::workspaceId(),$x['email'],'Potvrzení úhrady '.$x['doc_number'],'Dobrý den, potvrzujeme přijetí úhrady faktury '.$x['doc_number'].'.',null,rtrim(Env::get('APP_URL',''),'/').'/d/'.$x['public_token']);}Response::redirect('/documents');}
+    public function markPaid(int $id):void{
+        Auth::require();Auth::verifyCsrf();
+        $wid=Auth::workspaceId();
+        $s=$this->db->prepare('SELECT * FROM documents WHERE id=? AND workspace_id=?');$s->execute([$id,$wid]);$d=$s->fetch();
+        if(!$d)Response::abort(404,'Doklad nenalezen.');
+        if($d['status']==='cancelled' || $d['payment_status']==='cancelled')Response::abort(422,'Stornovaný doklad nelze označit jako uhrazený.');
+        if(!in_array($d['doc_type'],['invoice','proforma'],true))Response::abort(422,'Platbu lze zaznamenat pouze k faktuře nebo zálohové faktuře.');
+
+        $paid=DocumentService::paid($this->db,$wid,$id);
+        $remaining=max(0,(float)$d['total_with_vat']-$paid);
+        if($remaining<=0.01)Response::abort(422,'Doklad je již plně uhrazen.');
+
+        $rawAmount=trim((string)($_POST['amount']??''));
+        $amount=$rawAmount===''?$remaining:(float)str_replace(',','.',$rawAmount);
+        if(!is_finite($amount)||$amount<=0)Response::abort(422,'Částka úhrady musí být větší než 0.');
+        if($amount>$remaining+0.01)Response::abort(422,'Částka úhrady nesmí být vyšší než zbývající částka.');
+        $amount=round(min($amount,$remaining),2);
+
+        $paidAt=trim((string)($_POST['paid_at']??date('Y-m-d')));
+        $dt=\DateTime::createFromFormat('Y-m-d',$paidAt);
+        if(!$dt || $dt->format('Y-m-d')!==$paidAt)Response::abort(422,'Datum úhrady není platné.');
+        $method=(string)($_POST['method']??'bank');
+        if(!in_array($method,['bank','cash','card','other'],true))$method='bank';
+
+        $this->db->prepare('INSERT INTO payments(workspace_id,document_id,amount,paid_at,method,source) VALUES(?,?,?,?,?,?)')->execute([$wid,$id,$amount,$paidAt,$method,'manual']);
+        DocumentService::refreshPaymentStatus($this->db,$wid,$id);
+        $status=$this->db->prepare('SELECT payment_status FROM documents WHERE id=? AND workspace_id=?');$status->execute([$id,$wid]);$newStatus=(string)$status->fetchColumn();
+        $this->audit('payment','document',$id,['amount'=>$amount,'paid_at'=>$paidAt,'method'=>$method,'source'=>'manual']);
+        if($newStatus==='paid'){
+            $q=$this->db->prepare('SELECT d.doc_number,d.public_token,c.email FROM documents d LEFT JOIN customers c ON c.id=d.customer_id WHERE d.id=? AND d.workspace_id=?');$q->execute([$id,$wid]);$x=$q->fetch();
+            if($x&&$x['email']&&$this->workspaceMail($wid,'receipt'))$this->queueEmail($wid,$x['email'],'Potvrzení úhrady '.$x['doc_number'],'Dobrý den, potvrzujeme přijetí úhrady dokladu '.$x['doc_number'].'.',null,rtrim(Env::get('APP_URL',''),'/').'/d/'.$x['public_token']);
+        }
+        Response::redirect('/documents');
+    }
+
     public function convertToJob(int $id):void{Auth::require();Auth::verifyCsrf();$s=$this->db->prepare('SELECT * FROM documents WHERE id=? AND workspace_id=?');$s->execute([$id,Auth::workspaceId()]);$d=$s->fetch();if(!$d)Response::abort(404,'Doklad nenalezen.');if($d['doc_type']!=='offer' || $d['status']!=='accepted')Response::abort(422,'Na zakázku lze převést pouze schválenou nabídku.');$this->db->prepare('INSERT INTO jobs(workspace_id,customer_id,name,description,budget,status,source_document_id) VALUES(?,?,?,?,?,?,?)')->execute([Auth::workspaceId(),$d['customer_id'],'Zakázka '.$d['doc_number'],'Vytvořeno z nabídky.', $d['total_with_vat'],'planned',$id]);Response::redirect('/jobs');}
     private function publicDocumentByToken(string $token):array{
         $token=trim($token);
@@ -929,8 +963,11 @@ final class WebController {
         Auth::require(); $wid=Auth::workspaceId(); $mailbox=MailboxService::ensureWorkspace($this->db,$wid);
         $q=$this->db->prepare('SELECT * FROM email_mailboxes WHERE id=? AND workspace_id=? AND active=1');$q->execute([$mailbox,$wid]);$box=$q->fetch();
         if(!$box)Response::abort(403,'E-mailová schránka není aktivní.');
-        $q=$this->db->prepare('SELECT m.*, (SELECT COUNT(*) FROM mailbox_attachments a WHERE a.message_id=m.id) attachment_count FROM mailbox_messages m WHERE m.mailbox_id=? ORDER BY m.created_at DESC LIMIT 100');$q->execute([$mailbox]);
-        View::render('mail/index',['title'=>'E-mail','mailbox'=>$box,'rows'=>$q->fetchAll()]);
+        $folder=(string)($_GET['folder']??'inbound');if(!in_array($folder,['inbound','outbound'],true))$folder='inbound';
+        $counts=['inbound'=>0,'outbound'=>0];
+        $cq=$this->db->prepare('SELECT direction,COUNT(*) FROM mailbox_messages WHERE mailbox_id=? GROUP BY direction');$cq->execute([$mailbox]);foreach($cq->fetchAll() as $r){$dir=(string)$r['direction'];if(isset($counts[$dir]))$counts[$dir]=(int)$r['COUNT(*)'];}
+        $q=$this->db->prepare('SELECT m.*, (SELECT COUNT(*) FROM mailbox_attachments a WHERE a.message_id=m.id) attachment_count FROM mailbox_messages m WHERE m.mailbox_id=? AND m.direction=? ORDER BY m.created_at DESC LIMIT 100');$q->execute([$mailbox,$folder]);
+        View::render('mail/index',['title'=>'E-mail','mailbox'=>$box,'rows'=>$q->fetchAll(),'folder'=>$folder,'counts'=>$counts]);
     }
     public function mailboxMessage(int $id):void{
         Auth::require();$wid=Auth::workspaceId();$mid=MailboxService::ensureWorkspace($this->db,$wid);$q=$this->db->prepare('SELECT m.*,b.localpart,b.display_name FROM mailbox_messages m JOIN email_mailboxes b ON b.id=m.mailbox_id WHERE m.id=? AND b.workspace_id=? LIMIT 1');$q->execute([$id,$wid]);$msg=$q->fetch();if(!$msg)Response::abort(404,'E-mail nenalezen.');$a=$this->db->prepare('SELECT * FROM mailbox_attachments WHERE message_id=? ORDER BY id');$a->execute([$id]);View::render('mail/message',['title'=>'E-mail','message'=>$msg,'attachments'=>$a->fetchAll(),'mailbox_id'=>$mid]);

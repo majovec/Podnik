@@ -10,7 +10,7 @@ use App\Core\Env;
 use App\Services\InboundMailService;
 
 $recipient='';
-foreach($argv as $arg){ if(str_starts_with($arg,'--recipient=')){ $recipient=trim(substr($arg,11)); } }
+foreach($argv as $arg){ if(str_starts_with($arg,'--recipient=')){ $recipient=trim(substr($arg,12)); } }
 if($recipient==='') $recipient=trim((string)(getenv('ORIGINAL_RECIPIENT')?:getenv('RECIPIENT')?:''));
 $raw=file_get_contents('php://stdin');
 if($raw===false || strlen($raw)===0) exit(75);

@@ -239,8 +239,18 @@ final class MailerService {
             null,
             null
         );
+        if($attachments){
+            $headers[]='Content-Type: multipart/mixed; boundary="'.$mix.'"';
+        }else{
+            $headers[]='Content-Type: multipart/alternative; boundary="'.$alt.'"';
+        }
+
         $out=implode($eol,$headers).$eol.$eol;
-        if($attachments){$out.='Content-Type: multipart/mixed; boundary="'.$mix.'"'.$eol.$eol;$out.='--'.$mix.$eol.'Content-Type: multipart/alternative; boundary="'.$alt.'"'.$eol.$eol;}else{$out.='Content-Type: multipart/alternative; boundary="'.$alt.'"'.$eol.$eol;}
+
+        if($attachments){
+            $out.='--'.$mix.$eol;
+            $out.='Content-Type: multipart/alternative; boundary="'.$alt.'"'.$eol.$eol;
+        }
         $out.='--'.$alt.$eol.'Content-Type: text/plain; charset=UTF-8'.$eol.'Content-Transfer-Encoding: 8bit'.$eol.$eol.$body.$eol.$eol;$out.='--'.$alt.$eol.'Content-Type: text/html; charset=UTF-8'.$eol.'Content-Transfer-Encoding: 8bit'.$eol.$eol.$html.$eol.$eol.'--'.$alt.'--'.$eol;
         if($attachments){foreach($attachments as $a){if(empty($a['path'])||!is_file($a['path']))continue;$fn=str_replace('"','',basename((string)($a['name']??basename($a['path']))));$mime=(string)($a['mime']??'application/octet-stream');$data=@file_get_contents($a['path']);if($data===false)continue;$out.='--'.$mix.$eol.'Content-Type: '.$mime.'; name="'.$fn.'"'.$eol.'Content-Disposition: attachment; filename="'.$fn.'"'.$eol.'Content-Transfer-Encoding: base64'.$eol.$eol.chunk_split(base64_encode($data),76,$eol).$eol;} $out.='--'.$mix.'--'.$eol;}
         $proc=@proc_open([$sendmail,'-t','-oi'],[0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes);if(!is_resource($proc)){self::$lastError='Nepodařilo se spustit sendmail.';return false;}fwrite($pipes[0],$out);fclose($pipes[0]);$stderr=stream_get_contents($pipes[2]);fclose($pipes[1]);fclose($pipes[2]);$code=proc_close($proc);if($code!==0){self::$lastError='Sendmail skončil kódem '.$code.($stderr!==''?': '.trim($stderr):'');return false;}return true;

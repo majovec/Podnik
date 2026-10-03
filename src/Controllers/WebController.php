@@ -7,7 +7,8 @@ use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\RoundBlockSizeMode;
 use Endroid\QrCode\Writer\PngWriter;
 use App\Core\{Auth,View,Response,Env};
-use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService,BankCsvParser,AccountingExportService,EmailTemplateService,CnbRateService,InboundMailService,MailboxService};
+use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService,BankCsvParser,AccountingExportService,EmailTemplateService,CnbRateService,InboundMailService,MailboxService,ReportService};
+use App\Config\BusinessTypes;
 final class WebController {
     public function __construct(private PDO $db){}
     private function qrPng(string $data,int $size=360,int $margin=10):array {
@@ -33,6 +34,41 @@ final class WebController {
         if(!in_array($page,$allowed,true)) Response::abort(404,'Stránka nebyla nalezena.');
         View::renderStandalone('legal/'.$page,['title'=>match($page){'terms'=>'Obchodní podmínky','recurring'=>'Podmínky opakovaných plateb','contact'=>'Kontakt a podpora','privacy'=>'Ochrana osobních údajů'},'settings'=>$this->saasSettings(),'supportEmail'=>Env::get('SUPPORT_EMAIL','help@byznio.cz')]);
     }
+    public function reports():void{
+        Auth::require();
+        $kind=(($_GET['period']??'week')==='month')?'month':'week';
+        [$start,$end]=ReportService::ranges($kind);
+        $report=ReportService::summarize($this->db,(int)Auth::workspaceId(),$start,$end);
+        View::render('reports/index',['title'=>$kind==='month'?'Měsíční přehled':'Týdenní přehled','report'=>$report,'kind'=>$kind]);
+    }
+    public function workspaceSwitch(int $workspaceId):void{
+        Auth::verifyCsrf(); Auth::switchWorkspace($workspaceId); Response::redirect($_SERVER['HTTP_REFERER']??'/');
+    }
+    public function workspaceNewForm():void{
+        Auth::requireRole(['owner','admin']);
+        View::render('workspace/new',['title'=>'Přidat firmu','types'=>BusinessTypes::all()]);
+    }
+    public function workspaceNew():void{
+        Auth::requireRole(['owner','admin']); Auth::verifyCsrf();
+        $name=trim((string)($_POST['name']??'')); $type=(string)($_POST['business_type']??'services');
+        if($name==='')Response::abort(422,'Zadejte název firmy.');
+        if(!isset(BusinessTypes::all()[$type]))$type='services';
+        $local=$this->makeEmailLocalpart($name);
+        $baseLocal=$local;$n=1;
+        while(true){$q=$this->db->prepare('SELECT COUNT(*) FROM workspaces WHERE lower(email_localpart)=?');$q->execute([strtolower($local)]);if((int)$q->fetchColumn()===0)break;$n++;$local=$baseLocal.'-'.$n;}
+        $this->db->beginTransaction();
+        try{
+            $this->db->prepare('INSERT INTO workspaces(name,plan,status,email_localpart,business_type,weekly_report_enabled,monthly_report_enabled) VALUES(?,?,?,?,?,?,?)')->execute([$name,'all','trial',$local,$type,1,1]);
+            $wid=(int)$this->db->lastInsertId();
+            MailboxService::ensureWorkspace($this->db,$wid);
+            $trialDays=(int)$this->saasSettings()['trial_days'];
+            $this->db->prepare('INSERT INTO subscriptions(workspace_id,plan,status,trial_ends_at,billing_interval,custom_monthly_price_czk) VALUES(?,?,?,datetime("now",?||" days"),?,?,?)')->execute([$wid,'all','trial',$trialDays,'month',(float)$this->saasSettings()['monthly_price_czk']]);
+            $this->db->prepare('INSERT INTO workspace_members(workspace_id,user_id,role) VALUES(?,?,?)')->execute([$wid,Auth::id(),'owner']);
+            $this->db->commit();
+        }catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();Response::abort(500,'Novou firmu se nepodařilo vytvořit.');}
+        Auth::switchWorkspace($wid);
+        Response::redirect('/');
+    }
     public function dashboard():void{
         Auth::require();$wid=Auth::workspaceId();$k=[];
         $queries=['customers'=>'SELECT COUNT(*) FROM customers WHERE workspace_id=? AND active=1','invoices'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice"','overdue'=>'SELECT COUNT(*) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND payment_status!="paid" AND due_date<date("now")','jobs'=>'SELECT COUNT(*) FROM jobs WHERE workspace_id=? AND status NOT IN ("done","cancelled")'];
@@ -47,7 +83,8 @@ final class WebController {
         $recentPayments=$this->scope('SELECT p.*,d.doc_number,c.company_name,c.first_name,c.last_name FROM payments p JOIN documents d ON d.id=p.document_id LEFT JOIN customers c ON c.id=d.customer_id WHERE p.workspace_id=? ORDER BY p.paid_at DESC,p.id DESC LIMIT 8');
         $monthly=[];$monthCursor=new \DateTimeImmutable('first day of this month');for($i=5;$i>=0;$i--){$m=$monthCursor->modify('-'.$i.' months');$start=$m->format('Y-m-01');$end=$m->modify('last day of this month')->format('Y-m-d');$q=$this->db->prepare('SELECT COALESCE(SUM(total_with_vat),0) FROM documents WHERE workspace_id=? AND doc_type="invoice" AND issue_date BETWEEN ? AND ?');$q->execute([$wid,$start,$end]);$rev=(float)$q->fetchColumn();$q=$this->db->prepare('SELECT COALESCE(SUM(amount),0) FROM expenses WHERE workspace_id=? AND expense_date BETWEEN ? AND ?');$q->execute([$wid,$start,$end]);$exp=(float)$q->fetchColumn();$monthly[]=['label'=>$m->format('m/Y'),'revenue'=>$rev,'expenses'=>$exp];}
         $recommendations=[];if($k['overdue'])$recommendations[]='Máte '.$k['overdue'].' faktur po splatnosti – zkontrolujte upomínky.';if($low)$recommendations[]='Sklad: '.count($low).' položek je na minimální zásobě.';if($k['cashflow']<0)$recommendations[]='Cashflow za aktuální měsíc je záporné.';if(!$recommendations)$recommendations[]='Vše důležité je zatím pod kontrolou.';
-        View::render('dashboard/index',['title'=>'Přehled','k'=>$k,'alerts'=>$alerts,'events'=>$events,'tasks'=>$tasks,'todayTasks'=>$todayTasks,'low'=>$low,'recentPayments'=>$recentPayments,'monthly'=>$monthly,'recommendations'=>$recommendations]);
+        [$weekStart,$weekEnd]=ReportService::ranges('week'); [$monthStart,$monthEnd]=ReportService::ranges('month'); $reportWeek=ReportService::summarize($this->db,(int)$wid,$weekStart,$weekEnd); $reportMonth=ReportService::summarize($this->db,(int)$wid,$monthStart,$monthEnd);
+        View::render('dashboard/index',['title'=>'Přehled','k'=>$k,'alerts'=>$alerts,'events'=>$events,'tasks'=>$tasks,'todayTasks'=>$todayTasks,'low'=>$low,'recentPayments'=>$recentPayments,'monthly'=>$monthly,'recommendations'=>$recommendations,'reportWeek'=>$reportWeek,'reportMonth'=>$reportMonth]);
     }
     public function login():void{if(Auth::check())Response::redirect('/');View::render('auth/login',['title'=>'Přihlášení']);}
     public function loginPost():void{Auth::verifyCsrf();$email=strtolower(trim($_POST['email']??''));$ip=$_SERVER['REMOTE_ADDR']??'0.0.0.0';$ih=hash_hmac('sha256',$ip,Env::get('APP_KEY','fallback'));$eh=hash_hmac('sha256',$email,Env::get('APP_KEY','fallback'));$s=$this->db->prepare('SELECT COUNT(*) FROM login_attempts WHERE (ip_hash=? OR email_hash=?) AND attempted_at>?');$s->execute([$ih,$eh,time()-900]);if((int)$s->fetchColumn()>=8){View::render('auth/login',['title'=>'Přihlášení','error'=>'Příliš mnoho neúspěšných pokusů. Zkuste to později.']);return;}$s=$this->db->prepare('SELECT * FROM users WHERE email=? AND active=1');$s->execute([$email]);$u=$s->fetch();if(!$u||!password_verify($_POST['password']??'',$u['password_hash'])){$this->db->prepare('INSERT INTO login_attempts(ip_hash,email_hash,attempted_at) VALUES(?,?,?)')->execute([$ih,$eh,time()]);View::render('auth/login',['title'=>'Přihlášení','error'=>'Neplatný e-mail nebo heslo.']);return;}if(empty($u['email_verified_at'])){$_SESSION['byznio_pending_verification_email']=$u['email'];View::render('auth/login',['title'=>'Přihlášení','error'=>'Nejdříve potvrďte svůj e-mail. Poslali jsme vám aktivační odkaz.','verification_email'=>$u['email']]);return;}$this->db->prepare('DELETE FROM login_attempts WHERE ip_hash=? OR email_hash=?')->execute([$ih,$eh]);$this->db->prepare('UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?')->execute([(int)$u['id']]);Auth::login($u);Response::redirect('/');}
@@ -95,7 +132,7 @@ final class WebController {
         // R28: company and final onboarding steps have dedicated server-rendered views.
         // This removes any ambiguity from conditional markup in the shared step template.
         if($step===2){
-            View::renderStandalone('onboarding/standalone',['title'=>'Nastavme tvoji firmu','step'=>2,'company'=>$company]);
+            View::renderStandalone('onboarding/standalone',['title'=>'Nastavme tvoji firmu','step'=>2,'company'=>$company,'types'=>BusinessTypes::all()]);
             return;
         }
         if($step===7){
@@ -122,7 +159,7 @@ final class WebController {
         $ico=preg_replace('/\D/','',(string)($_POST['ico']??''));$d=['name'=>trim((string)($_POST['company_name']??'')),'ico'=>$ico,'dic'=>trim((string)($_POST['dic']??'')),'street'=>trim((string)($_POST['street']??'')),'city'=>trim((string)($_POST['city']??'')),'zip'=>trim((string)($_POST['zip']??'')),'phone'=>trim((string)($_POST['phone']??''))];
         if($ico!=='' && !empty($_POST['ares'])){try{$a=AresService::lookup($ico);if($a)$d=array_merge($d,$a);}catch(\Throwable $e){}}
         if($d['name']==='')$d['name']=$this->company()['name']??'Byznio';
-        $this->db->prepare('UPDATE workspaces SET name=?,ico=?,dic=?,street=?,city=?,zip=?,phone=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$d['name'],$d['ico']?:null,$d['dic']?:null,$d['street']?:null,$d['city']?:null,$d['zip']?:null,$d['phone']?:null,Auth::workspaceId()]);
+        $businessType=(string)($_POST['business_type']??'services'); if(!isset(BusinessTypes::all()[$businessType]))$businessType='services'; $this->db->prepare('UPDATE workspaces SET name=?,ico=?,dic=?,street=?,city=?,zip=?,phone=?,business_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$d['name'],$d['ico']?:null,$d['dic']?:null,$d['street']?:null,$d['city']?:null,$d['zip']?:null,$d['phone']?:null,$businessType,Auth::workspaceId()]);
         Response::redirect('/uvod?step=3');
     }
     public function onboardingComplete():void{Auth::require();Auth::verifyCsrf();$this->db->prepare('UPDATE workspaces SET onboarding_completed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([Auth::workspaceId()]);unset($_SESSION['byznio_new_registration']);Response::redirect('/');}
@@ -525,6 +562,7 @@ final class WebController {
             $_POST['name'],$local,trim((string)($_POST['mail_display_name']??$_POST['name'])),isset($_POST['mail_enabled'])?1:0,isset($_POST['mail_invoices'])?1:0,isset($_POST['mail_reminders'])?1:0,isset($_POST['mail_receipts'])?1:0,isset($_POST['mail_offers'])?1:0,isset($_POST['mail_orders'])?1:0,isset($_POST['mail_proformas'])?1:0,isset($_POST['mail_credits'])?1:0,isset($_POST['weekly_report_enabled'])?1:0,isset($_POST['monthly_report_enabled'])?1:0,
             $_POST['ico']??null,$_POST['dic']??null,$_POST['street']??null,$_POST['city']??null,$_POST['zip']??null,$_POST['email']??null,$_POST['phone']??null,$iban,Auth::workspaceId()
         ]);
+        $businessType=(string)($_POST['business_type']??'services'); if(!isset(BusinessTypes::all()[$businessType]))$businessType='services'; $this->db->prepare('UPDATE workspaces SET business_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$businessType,Auth::workspaceId()]);
         MailboxService::syncWorkspace($this->db,Auth::workspaceId());
         if(!empty($_FILES['logo']['tmp_name']) && is_uploaded_file($_FILES['logo']['tmp_name'])){
             $f=$_FILES['logo'];

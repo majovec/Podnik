@@ -32,3 +32,19 @@ $maxChart=1; foreach(($monthly??[]) as $m){$maxChart=max($maxChart,(float)$m['re
     <a class="mobile-module" href="/jobs"><span class="mobile-module-icon purple"><img src="/assets/dashboard-icons/jobs.svg" alt=""></span><div><b>Zakázky</b><small><?=number_format($jobsCount,0,',',' ')?> aktivních</small></div><span class="arrow">›</span></a>
   </div>
 </div>
+
+<section class="dashboard-report-strip">
+  <?php foreach([['week',$reportWeek,'Týdenní přehled'],['month',$reportMonth,'Měsíční přehled']] as $rp): $rr=$rp[1]; $cf=(float)$rr['cashflow']; ?>
+  <article class="card dashboard-report-card">
+    <div class="section-head"><div><span class="report-kicker">BYZNIO INTELIGENCE</span><h3><?=\App\Core\View::e($rp[2])?></h3><small><?=\App\Core\View::e($rr['start'])?> – <?=\App\Core\View::e($rr['end'])?></small></div><a class="btn" href="/reports?period=<?=$rp[0]?>">Detail</a></div>
+    <div class="dashboard-report-metrics">
+      <div><small>Vystaveno</small><b><?=\App\Core\View::money($rr['invoiceIssued'])?></b></div>
+      <div><small>Přijato</small><b><?=\App\Core\View::money($rr['received'])?></b></div>
+      <div><small>Neuhrazené přijaté faktury</small><b><?=\App\Core\View::money($rr['receivedInvoices'])?></b></div>
+      <div><small>Sklad</small><b><?=\App\Core\View::money($rr['stock'])?></b></div>
+      <div class="<?=$cf<0?'danger':''?>"><small>Cash flow z období</small><b><?=$cf>=0?'+':''?><?=\App\Core\View::money($cf)?></b></div>
+    </div>
+    <?php if($rr['overdue']>0 || $rr['low']>0): ?><div class="dashboard-report-alert"><?php if($rr['overdue']>0): ?>⚠ Pohledávky po splatnosti: <?=\App\Core\View::money($rr['overdue'])?><?php endif; ?><?php if($rr['low']>0): ?> · <?=\App\Core\View::e($rr['low'])?> položek skladu na minimu<?php endif; ?></div><?php else: ?><div class="dashboard-report-ok">✓ Žádný zásadní problém z těchto ukazatelů.</div><?php endif; ?>
+  </article>
+  <?php endforeach; ?>
+</section>

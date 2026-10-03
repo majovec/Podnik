@@ -1,5 +1,6 @@
 <?php
 namespace App\Core;
+use App\Config\Modules;
 final class Auth {
     private static ?array $user=null;
     public static function boot(): void {
@@ -41,12 +42,30 @@ final class Auth {
     public static function require(): void {
         if(!self::check()){Response::redirect('/login');}
         $uri=parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH)?:'/';
+        $moduleMap=[
+            '/documents/files'=>'documents','/received-invoices'=>'received_invoices','/communication'=>'communication','/reports'=>'reports','/mail'=>'mail',
+            '/customers'=>'crm','/documents'=>'invoicing','/jobs'=>'jobs','/expenses'=>'expenses','/products'=>'inventory','/bank'=>'bank','/calendar'=>'calendar',
+            '/recurring'=>'recurring','/tax'=>'tax','/tasks'=>'tasks','/contracts'=>'contracts','/reminders'=>'reminders','/automation'=>'automation','/export'=>'export'
+        ];
+        foreach($moduleMap as $prefix=>$module){if($uri===$prefix||str_starts_with($uri,$prefix.'/')){if(!self::moduleEnabled($module))Response::abort(403,'Tato funkce není pro tuto firmu aktivní. Zapněte ji v Nastavení → Funkce a moduly.');break;}}
         $map=[
             '/customers'=>'crm','/documents'=>'invoicing','/documents/files'=>'documents','/jobs'=>'jobs','/expenses'=>'expenses','/products'=>'inventory',
             '/bank'=>'bank','/calendar'=>'calendar','/tasks'=>'tasks','/ai'=>'ai','/recurring'=>'invoicing','/tax'=>'tax',
             '/automation'=>'automation','/settings/api-keys'=>'api','/admin/users'=>'team','/admin'=>'admin','/reminders'=>'invoicing'
         ];
         foreach($map as $prefix=>$permission){if($uri===$prefix||str_starts_with($uri,$prefix.'/')){if(!self::can($permission))Response::abort(403,'Nedostatečné oprávnění.');break;}}
+    }
+    public static function moduleEnabled(string $module): bool {
+        if(!self::$user)return false;
+        $s=Database::pdo()->prepare('SELECT modules_json,business_type FROM workspaces WHERE id=? LIMIT 1');
+        $s->execute([self::workspaceId()]); $workspace=$s->fetch();
+        if(!$workspace)return false;
+        return in_array($module,Modules::fromWorkspace($workspace),true);
+    }
+    public static function modules(): array {
+        if(!self::$user)return [];
+        $s=Database::pdo()->prepare('SELECT * FROM workspaces WHERE id=? LIMIT 1');$s->execute([self::workspaceId()]);$workspace=$s->fetch();
+        return $workspace?Modules::fromWorkspace($workspace):[];
     }
     public static function can(string $permission): bool {
         if(!self::$user)return false;

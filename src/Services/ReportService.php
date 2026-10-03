@@ -1,7 +1,7 @@
 <?php
 namespace App\Services;
 use PDO;
-use App\Config\BusinessTypes;
+use App\Config\BusinessTypes; use App\Config\Modules;
 
 final class ReportService {
     public static function summarize(PDO $db,int $wid,string $start,string $end): array {
@@ -30,9 +30,11 @@ final class ReportService {
         $st=$db->prepare('SELECT name,stock,unit,purchase_price,stock*purchase_price AS value FROM products WHERE workspace_id=? AND active=1 ORDER BY value DESC,name LIMIT 8');$st->execute([$wid]);$topStock=$st->fetchAll();
         $lowStock=[];
         $st=$db->prepare('SELECT name,stock,min_stock,unit FROM products WHERE workspace_id=? AND active=1 AND stock<=min_stock ORDER BY name LIMIT 8');$st->execute([$wid]);$lowStock=$st->fetchAll();
-        $businessType=(string)($q('SELECT business_type FROM workspaces WHERE id=?')?:'services');
+        $wsStmt=$db->prepare('SELECT * FROM workspaces WHERE id=? LIMIT 1');$wsStmt->execute([$wid]);$workspace=$wsStmt->fetch()?:[];
+        $businessType=(string)($workspace['business_type']??'services');
         $bt=BusinessTypes::get($businessType);
-        return compact('start','end','invoiceIssued','received','expenses','receivedInvoices','receivedInvoicesPeriod','receivables','overdue','cashflow','cashBank','bankCount','stock','products','low','customers','jobs','invoiceCount','paidInvoiceCount','dueReceivedCount','dueReceivedOverdue','topStock','lowStock','businessType','bt');
+        $modules=Modules::fromWorkspace($workspace);
+        return compact('start','end','invoiceIssued','received','expenses','receivedInvoices','receivedInvoicesPeriod','receivables','overdue','cashflow','cashBank','bankCount','stock','products','low','customers','jobs','invoiceCount','paidInvoiceCount','dueReceivedCount','dueReceivedOverdue','topStock','lowStock','businessType','bt','modules');
     }
     public static function ranges(string $kind): array {
         $today=new \DateTimeImmutable('today');
@@ -45,24 +47,24 @@ final class ReportService {
     }
     public static function html(array $r,string $label): string {
         $m=fn($v)=>number_format((float)$v,0,',',' ').' Kč';
+        $mods=$r['modules']??[];
         $cf=$r['cashflow']>=0?'+':'';
-        $stockRows='';
-        foreach($r['topStock'] as $p)$stockRows.='<tr><td>'.htmlspecialchars((string)$p['name']).'</td><td>'.htmlspecialchars((string)$p['stock']).' '.htmlspecialchars((string)$p['unit']).'</td><td style="text-align:right">'.$m($p['value']).'</td></tr>';
+        $rows='';
+        $rows.='<tr><td>Vystaveno</td><td align="right"><b>'.$m($r['invoiceIssued']).'</b></td></tr>';
+        if(in_array('bank',$mods,true))$rows.='<tr><td>Přijato</td><td align="right"><b>'.$m($r['received']).'</b></td></tr>';
+        if(in_array('expenses',$mods,true))$rows.='<tr><td>Výdaje</td><td align="right"><b>'.$m($r['expenses']).'</b></td></tr>';
+        if(in_array('bank',$mods,true)||in_array('expenses',$mods,true))$rows.='<tr><td>Cash flow z období</td><td align="right"><b>'.$cf.$m($r['cashflow']).'</b></td></tr>';
+        $rows.='<tr><td>Neuhrazené vystavené faktury</td><td align="right"><b>'.$m($r['receivables']).'</b></td></tr>';
+        if(in_array('received_invoices',$mods,true))$rows.='<tr><td>Neuhrazené přijaté faktury</td><td align="right"><b>'.$m($r['receivedInvoices']).'</b></td></tr>';
+        $stock='';
+        if(in_array('inventory',$mods,true)){
+            $stockRows=''; foreach($r['topStock'] as $p)$stockRows.='<tr><td>'.htmlspecialchars((string)$p['name']).'</td><td>'.htmlspecialchars((string)$p['stock']).' '.htmlspecialchars((string)$p['unit']).'</td><td style="text-align:right">'.$m($p['value']).'</td></tr>';
+            $stock='<h3 style="margin:26px 0 10px">Sklad</h3><p>Aktivní položky: <b>'.(int)$r['products'].'</b> · Na minimu: <b>'.(int)$r['low'].'</b></p>'.($stockRows?'<table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse"><tr><th align="left">Položka</th><th align="left">Množství</th><th align="right">Hodnota</th></tr>'.$stockRows.'</table>':'<p>Sklad zatím nemá evidované položky.</p>');
+        }
         return '<div style="font-family:Arial,sans-serif;color:#10213f">'
             .'<p style="font-size:20px;font-weight:700;margin:0 0 8px">'.htmlspecialchars($label).'</p>'
             .'<p style="color:#6c7890;margin:0 0 22px">Období '.htmlspecialchars($r['start']).' až '.htmlspecialchars($r['end']).'</p>'
-            .'<table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse">'
-            .'<tr><td>Vystaveno</td><td align="right"><b>'.$m($r['invoiceIssued']).'</b></td></tr>'
-            .'<tr><td>Přijato</td><td align="right"><b>'.$m($r['received']).'</b></td></tr>'
-            .'<tr><td>Výdaje</td><td align="right"><b>'.$m($r['expenses']).'</b></td></tr>'
-            .'<tr><td>Cash flow z období</td><td align="right"><b>'.$cf.$m($r['cashflow']).'</b></td></tr>'
-            .'<tr><td>Neuhrazené vystavené faktury</td><td align="right"><b>'.$m($r['receivables']).'</b></td></tr>'
-            .'<tr><td>Neuhrazené přijaté faktury</td><td align="right"><b>'.$m($r['receivedInvoices']).'</b></td></tr>'
-            .'<tr><td>Hodnota skladu</td><td align="right"><b>'.$m($r['stock']).'</b></td></tr>'
-            .'</table>'
-            .'<h3 style="margin:26px 0 10px">Sklad</h3>'
-            .'<p>Aktivní položky: <b>'.(int)$r['products'].'</b> · Na minimu: <b>'.(int)$r['low'].'</b></p>'
-            .($stockRows?'<table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse"><tr><th align="left">Položka</th><th align="left">Množství</th><th align="right">Hodnota</th></tr>'.$stockRows.'</table>':'<p>Sklad zatím nemá evidované položky.</p>')
+            .'<table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse">'.$rows.'</table>'.$stock
             .'</div>';
     }
 }

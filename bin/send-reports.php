@@ -16,6 +16,16 @@ if(!$isMonday && !$isFirst && !$forceWeekly && !$forceMonthly){echo "Report sche
 
 $workspaces=$pdo->query('SELECT * FROM workspaces WHERE status NOT IN ("suspended","cancelled") AND (weekly_report_enabled=1 OR monthly_report_enabled=1)')->fetchAll();
 $sent=0;$failed=0;
+$reportText=function(array $r,string $label):string{
+    $lines=[$label." za {$r['start']} až {$r['end']}.","Vystaveno: ".number_format($r['invoiceIssued'],0,',',' ' )." Kč"];
+    if(in_array('bank',$r['modules']??[],true))$lines[]="Přijato: ".number_format($r['received'],0,',',' ' )." Kč";
+    if(in_array('expenses',$r['modules']??[],true))$lines[]="Výdaje: ".number_format($r['expenses'],0,',',' ' )." Kč";
+    if(in_array('bank',$r['modules']??[],true)||in_array('expenses',$r['modules']??[],true))$lines[]="Cash flow z období: ".($r['cashflow']>=0?'+':'').number_format($r['cashflow'],0,',',' ' )." Kč";
+    $lines[]="Neuhrazené vystavené faktury: ".number_format($r['receivables'],0,',',' ' )." Kč";
+    if(in_array('received_invoices',$r['modules']??[],true))$lines[]="Neuhrazené přijaté faktury: ".number_format($r['receivedInvoices'],0,',',' ' )." Kč";
+    if(in_array('inventory',$r['modules']??[],true))$lines[]="Hodnota skladu: ".number_format($r['stock'],0,',',' ' )." Kč";
+    return implode("\n",$lines);
+};
 foreach($workspaces as $w){
     $wid=(int)$w['id'];
     $recipients=$pdo->prepare('SELECT email,name FROM users WHERE workspace_id=? AND active=1 AND role IN ("owner","admin") ORDER BY CASE WHEN role="owner" THEN 0 ELSE 1 END,id LIMIT 5');
@@ -30,7 +40,7 @@ foreach($workspaces as $w){
         $today=$now->format('Y-m-d');
         if($forceWeekly || (string)($w['last_weekly_report_at']??'')!==$today){
             [$start,$end]=ReportService::ranges('week');$r=ReportService::summarize($pdo,$wid,$start,$end);
-            $body="Týdenní přehled Byznia za {$start} až {$end}.\nVystaveno: ".number_format($r['invoiceIssued'],0,',',' ')." Kč\nPřijato: ".number_format($r['received'],0,',',' ')." Kč\nVýdaje: ".number_format($r['expenses'],0,',',' ')." Kč\nCash flow z období: ".($r['cashflow']>=0?'+':'').number_format($r['cashflow'],0,',',' ')." Kč\nNeuhrazené vystavené faktury: ".number_format($r['receivables'],0,',',' ')." Kč\nNeuhrazené přijaté faktury: ".number_format($r['receivedInvoices'],0,',',' ')." Kč\nHodnota skladu: ".number_format($r['stock'],0,',',' ')." Kč";
+            $body=$reportText($r,"Týdenní přehled Byznia");
             $html=ReportService::html($r,'Týdenní přehled · '.($w['name']??'Byznio'));
             foreach($toRows as $to){if(MailerService::sendReport((string)$to['email'],'Byznio · Týdenní přehled',$body,$html,$from,$name,rtrim((string)Env::get('APP_URL',''),'/').'/reports?period=week',$logoPath,$wid)){ $sent++; } else {$failed++;}}
             $pdo->prepare('UPDATE workspaces SET last_weekly_report_at=? WHERE id=?')->execute([$today,$wid]);
@@ -40,7 +50,7 @@ foreach($workspaces as $w){
         $today=$now->format('Y-m-d');
         if($forceMonthly || (string)($w['last_monthly_report_at']??'')!==$today){
             [$start,$end]=ReportService::ranges('month');$r=ReportService::summarize($pdo,$wid,$start,$end);
-            $body="Měsíční přehled Byznia za {$start} až {$end}.\nVystaveno: ".number_format($r['invoiceIssued'],0,',',' ')." Kč\nPřijato: ".number_format($r['received'],0,',',' ')." Kč\nVýdaje: ".number_format($r['expenses'],0,',',' ')." Kč\nCash flow z období: ".($r['cashflow']>=0?'+':'').number_format($r['cashflow'],0,',',' ')." Kč\nNeuhrazené vystavené faktury: ".number_format($r['receivables'],0,',',' ')." Kč\nNeuhrazené přijaté faktury: ".number_format($r['receivedInvoices'],0,',',' ')." Kč\nHodnota skladu: ".number_format($r['stock'],0,',',' ')." Kč";
+            $body=$reportText($r,"Měsíční přehled Byznia");
             $html=ReportService::html($r,'Měsíční přehled · '.($w['name']??'Byznio'));
             foreach($toRows as $to){if(MailerService::sendReport((string)$to['email'],'Byznio · Měsíční přehled',$body,$html,$from,$name,rtrim((string)Env::get('APP_URL',''),'/').'/reports?period=month',$logoPath,$wid)){ $sent++; } else {$failed++;}}
             $pdo->prepare('UPDATE workspaces SET last_monthly_report_at=? WHERE id=?')->execute([$today,$wid]);

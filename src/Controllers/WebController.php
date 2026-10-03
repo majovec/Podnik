@@ -8,7 +8,7 @@ use Endroid\QrCode\RoundBlockSizeMode;
 use Endroid\QrCode\Writer\PngWriter;
 use App\Core\{Auth,View,Response,Env};
 use App\Services\{AresService,MatcherService,AiService,PdfService,FioService,DocumentService,MailerService,OcrService,TaxService,SaltEdgeService,GoPayService,BackupService,BankTokenService,BankCsvParser,AccountingExportService,EmailTemplateService,CnbRateService,InboundMailService,MailboxService,ReportService};
-use App\Config\BusinessTypes;
+use App\Config\BusinessTypes; use App\Config\Modules;
 final class WebController {
     public function __construct(private PDO $db){}
     private function qrPng(string $data,int $size=360,int $margin=10):array {
@@ -39,26 +39,27 @@ final class WebController {
         $kind=(($_GET['period']??'week')==='month')?'month':'week';
         [$start,$end]=ReportService::ranges($kind);
         $report=ReportService::summarize($this->db,(int)Auth::workspaceId(),$start,$end);
-        View::render('reports/index',['title'=>$kind==='month'?'Měsíční přehled':'Týdenní přehled','report'=>$report,'kind'=>$kind]);
+        View::render('reports/index',['title'=>$kind==='month'?'Měsíční přehled':'Týdenní přehled','report'=>$report,'kind'=>$kind,'enabled_modules'=>Auth::modules(),'module_catalog'=>Modules::all()]);
     }
     public function workspaceSwitch(int $workspaceId):void{
         Auth::verifyCsrf(); Auth::switchWorkspace($workspaceId); Response::redirect($_SERVER['HTTP_REFERER']??'/');
     }
     public function workspaceNewForm():void{
         Auth::requireRole(['owner','admin']);
-        View::render('workspace/new',['title'=>'Přidat firmu','types'=>BusinessTypes::all()]);
+        View::render('workspace/new',['title'=>'Přidat firmu','types'=>BusinessTypes::all(),'module_catalog'=>Modules::all(),'recommended_modules'=>Modules::recommendedForBusinessType('services')]);
     }
     public function workspaceNew():void{
         Auth::requireRole(['owner','admin']); Auth::verifyCsrf();
         $name=trim((string)($_POST['name']??'')); $type=(string)($_POST['business_type']??'services');
         if($name==='')Response::abort(422,'Zadejte název firmy.');
         if(!isset(BusinessTypes::all()[$type]))$type='services';
+        $selectedModules=isset($_POST['modules'])&&is_array($_POST['modules'])?Modules::normalize($_POST['modules']):Modules::recommendedForBusinessType($type);
         $local=$this->makeEmailLocalpart($name);
         $baseLocal=$local;$n=1;
         while(true){$q=$this->db->prepare('SELECT COUNT(*) FROM workspaces WHERE lower(email_localpart)=?');$q->execute([strtolower($local)]);if((int)$q->fetchColumn()===0)break;$n++;$local=$baseLocal.'-'.$n;}
         $this->db->beginTransaction();
         try{
-            $this->db->prepare('INSERT INTO workspaces(name,plan,status,email_localpart,business_type,weekly_report_enabled,monthly_report_enabled) VALUES(?,?,?,?,?,?,?)')->execute([$name,'all','trial',$local,$type,1,1]);
+            $this->db->prepare('INSERT INTO workspaces(name,plan,status,email_localpart,business_type,modules_json,weekly_report_enabled,monthly_report_enabled) VALUES(?,?,?,?,?,?,?,?)')->execute([$name,'all','trial',$local,$type,json_encode($selectedModules,JSON_UNESCAPED_UNICODE),1,1]);
             $wid=(int)$this->db->lastInsertId();
             MailboxService::ensureWorkspace($this->db,$wid);
             $trialDays=(int)$this->saasSettings()['trial_days'];
@@ -548,7 +549,8 @@ final class WebController {
             Response::json(['ok'=>true,'message'=>$result['message']??'Akce byla provedena.']);
         }catch(\Throwable $e){Response::json(['ok'=>false,'error'=>$e->getMessage()],422);}
     }
-    public function settings():void{Auth::requireRole(['owner','admin']);$s=$this->db->prepare('SELECT * FROM workspaces WHERE id=?');$s->execute([Auth::workspaceId()]);$series=$this->db->prepare('SELECT * FROM document_series WHERE workspace_id=? ORDER BY doc_type');$series->execute([Auth::workspaceId()]);View::render('settings/index',['title'=>'Nastavení','workspace'=>$s->fetch(),'series'=>$series->fetchAll(),'mail_domain'=>$this->saasSettings()['mail_domain'],'gopay_connected'=>GoPayService::isConnected(Auth::workspaceId())]);}
+    public function settings():void{Auth::requireRole(['owner','admin']);$s=$this->db->prepare('SELECT * FROM workspaces WHERE id=?');$s->execute([Auth::workspaceId()]);$series=$this->db->prepare('SELECT * FROM document_series WHERE workspace_id=? ORDER BY doc_type');$series->execute([Auth::workspaceId()]);$workspace=$s->fetch()?:[];
+        View::render('settings/index',['title'=>'Nastavení','workspace'=>$workspace,'series'=>$series->fetchAll(),'mail_domain'=>$this->saasSettings()['mail_domain'],'gopay_connected'=>GoPayService::isConnected(Auth::workspaceId()),'module_catalog'=>Modules::all(),'enabled_modules'=>Modules::fromWorkspace($workspace),'recommended_modules'=>Modules::recommendedForBusinessType((string)($workspace['business_type']??'services')),'business_types'=>BusinessTypes::all()]);}
     public function settingsSave():void{
         Auth::requireRole(['owner','admin']); Auth::verifyCsrf();
         $local=MailboxService::normalizeLocalpart((string)($_POST['email_localpart']??''));
@@ -562,7 +564,9 @@ final class WebController {
             $_POST['name'],$local,trim((string)($_POST['mail_display_name']??$_POST['name'])),isset($_POST['mail_enabled'])?1:0,isset($_POST['mail_invoices'])?1:0,isset($_POST['mail_reminders'])?1:0,isset($_POST['mail_receipts'])?1:0,isset($_POST['mail_offers'])?1:0,isset($_POST['mail_orders'])?1:0,isset($_POST['mail_proformas'])?1:0,isset($_POST['mail_credits'])?1:0,isset($_POST['weekly_report_enabled'])?1:0,isset($_POST['monthly_report_enabled'])?1:0,
             $_POST['ico']??null,$_POST['dic']??null,$_POST['street']??null,$_POST['city']??null,$_POST['zip']??null,$_POST['email']??null,$_POST['phone']??null,$iban,Auth::workspaceId()
         ]);
-        $businessType=(string)($_POST['business_type']??'services'); if(!isset(BusinessTypes::all()[$businessType]))$businessType='services'; $this->db->prepare('UPDATE workspaces SET business_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$businessType,Auth::workspaceId()]);
+        $businessType=(string)($_POST['business_type']??'services'); if(!isset(BusinessTypes::all()[$businessType]))$businessType='services';
+        $selectedModules=isset($_POST['modules'])&&is_array($_POST['modules'])?Modules::normalize($_POST['modules']):Modules::fromWorkspace(['modules_json'=>null,'business_type'=>$businessType]);
+        $this->db->prepare('UPDATE workspaces SET business_type=?,modules_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$businessType,json_encode($selectedModules,JSON_UNESCAPED_UNICODE),Auth::workspaceId()]);
         MailboxService::syncWorkspace($this->db,Auth::workspaceId());
         if(!empty($_FILES['logo']['tmp_name']) && is_uploaded_file($_FILES['logo']['tmp_name'])){
             $f=$_FILES['logo'];
